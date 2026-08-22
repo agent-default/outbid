@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>outbid</title>
+  <style>
+    :root { color-scheme: dark; --bg: #0b0b0b; --fg: #ececec; --muted: #8a8a8a; --line: #222; --acc: #c8ff3d; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 16px/1.45 ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+    main { max-width: 720px; margin: 0 auto; padding: 48px 20px 96px; }
+    h1 { font-size: 14px; letter-spacing: 0.18em; text-transform: uppercase; font-weight: 600; margin: 0 0 8px; }
+    .lede { font-size: 28px; letter-spacing: -0.03em; margin: 0 0 8px; }
+    .sub { color: var(--muted); margin: 0 0 36px; }
+    .sub code { color: var(--acc); }
+    form { display: grid; gap: 10px; margin-bottom: 36px; }
+    input, textarea, button { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: #111; color: var(--fg); padding: 12px 14px; }
+    textarea { min-height: 72px; resize: vertical; }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+    button { background: var(--acc); color: #111; font-weight: 650; border: 0; cursor: pointer; padding-inline: 20px; }
+    button:disabled { opacity: 0.5; cursor: wait; }
+    .hint { color: var(--muted); font-size: 13px; }
+    ol { list-style: none; padding: 0; margin: 0; }
+    li { display: grid; grid-template-columns: 48px 1fr auto; gap: 12px; padding: 16px 0; border-top: 1px solid var(--line); }
+    .rank { color: var(--muted); font-variant-numeric: tabular-nums; }
+    a { color: var(--fg); text-decoration: none; }
+    a:hover { color: var(--acc); }
+    .desc { color: var(--muted); font-size: 14px; }
+    .bid { font-variant-numeric: tabular-nums; color: var(--acc); }
+    .err { color: #ff6b6b; }
+    .ok { color: var(--acc); }
+    pre { white-space: pre-wrap; background: #111; border: 1px solid var(--line); padding: 12px; border-radius: 8px; font-size: 12px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>outbid</h1>
+    <p class="lede">Rank is the bid.</p>
+    <p class="sub">Pay USDC over HTTP 402. Paying again on the same URL adds to its total. Minimum $0.01. No ads, no algorithm. <code>GET /skill.md</code></p>
+
+    <form id="form">
+      <input name="url" required placeholder="https://your-site.com or @handle" autocomplete="off" />
+      <textarea name="description" maxlength="280" placeholder="one line"></textarea>
+      <div class="row">
+        <input name="amount" type="number" min="0.01" step="0.01" required />
+        <button type="submit">Outbid</button>
+      </div>
+      <p class="hint" id="hint"></p>
+      <p id="status"></p>
+      <pre id="pay" hidden></pre>
+    </form>
+
+    <ol id="board"></ol>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let meta = { dry: true, claim_1_for: 0.01 };
+
+    async function load() {
+      const [m, b] = await Promise.all([
+        fetch("/api/meta").then((r) => r.json()),
+        fetch("/api/board").then((r) => r.json()),
+      ]);
+      meta = m;
+      $("form").amount.value = b.claim_1_for.toFixed(2);
+      $("hint").textContent = m.dry
+        ? `Dev mode (X402_DRY=1). Claim #1 for $${b.claim_1_for.toFixed(2)}. Live 402 is POST /bid.`
+        : `Claim #1 for $${b.claim_1_for.toFixed(2)}. This form posts to POST /bid and expects an x402 client.`;
+      $("board").innerHTML = (b.listings || []).map((row) => `
+        <li>
+          <div class="rank">#${row.rank}</div>
+          <div>
+            <a href="/go/${row.id}">${escapeHtml(row.url)}</a>
+            <div class="desc">${escapeHtml(row.description || "")} · ${row.clicks} clicks</div>
+          </div>
+          <div class="bid">$${row.bid_usdc.toFixed(2)}</div>
+        </li>
+      `).join("") || "<li class='desc'>board is empty</li>";
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    $("form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const url = fd.get("url");
+      const description = fd.get("description");
+      const amount = fd.get("amount");
+      const path = meta.dry ? "/bid/dry" : "/bid";
+      $("status").textContent = "paying…";
+      $("status").className = "";
+      $("pay").hidden = true;
+      const res = await fetch(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url, amount: Number(amount), description }),
+      });
+      const text = await res.text();
+      let body; try { body = JSON.parse(text); } catch { body = { raw: text }; }
+      if (res.status === 402) {
+        const req = res.headers.get("PAYMENT-REQUIRED") || res.headers.get("payment-required");
+        $("status").textContent = "402 Payment Required — retry with an x402 client.";
+        $("status").className = "ok";
+        $("pay").hidden = false;
+        $("pay").textContent = [
+          `POST ${location.origin}/bid  {"url":${JSON.stringify(url)},"amount":${amount}}`,
+          `PAYMENT-REQUIRED: ${req ? req.slice(0, 80) + "…" : "(header)"}`,
+          "",
+          "pay it with any x402 client:",
+          `npx agentcash@latest fetch '${location.origin}/bid?amount=${amount}'`,
+          `node scripts/bid.mjs ${JSON.stringify(url)} ${amount}`,
+        ].join("\n");
+        return;
+      }
+      if (!res.ok) {
+        $("status").textContent = body.error || res.statusText;
+        $("status").className = "err";
+        return;
+      }
+      if (body.listing) {
+        $("status").textContent = `listed #${body.listing.rank} at $${body.listing.bid_usdc.toFixed(2)}`;
+      } else {
+        $("status").textContent = "accepted — credited on settlement";
+      }
+      $("status").className = "ok";
+      await load();
+    });
+
+    load();
+  </script>
+</body>
+</html>

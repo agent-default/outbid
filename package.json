@@ -1,0 +1,30 @@
+{
+  "name": "outbid",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pay-to-rank board. Rank is the bid. Checkout is HTTP 402.",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "bid": "node scripts/bid.mjs",
+    "wallets:init": "node scripts/init-wallets.mjs",
+    "wallets:status": "node scripts/wallet-status.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@x402/core": "2.23.0",
+    "@x402/evm": "2.23.0",
+    "@x402/express": "2.23.0",
+    "@x402/extensions": "2.23.0",
+    "@x402/svm": "2.23.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@x402/fetch": "2.23.0"
+  }
+}
