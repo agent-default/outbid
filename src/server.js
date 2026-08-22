@@ -293,11 +293,21 @@ export async function createApp(overrides = {}) {
     return res.json(result);
   });
 
-  app.get("/skill.md", (_req, res) => {
-    res.type("text/markdown").send(skillMd(cfg));
+  // Absolute base URL as seen by the caller. Behind the funnel/tunnel the Host
+  // header carries the public name, so served docs are runnable from anywhere
+  // with zero substitution — no relative paths, no placeholders (paste-traps).
+  function baseUrl(req) {
+    const proto = req.get("x-forwarded-proto") || req.protocol || "http";
+    const host = req.get("x-forwarded-host") || req.get("host") || `${cfg.HOST}:${cfg.PORT}`;
+    return `${proto}://${host}`;
+  }
+
+  app.get("/skill.md", (req, res) => {
+    res.type("text/markdown").send(skillMd(cfg, baseUrl(req)));
   });
 
-  app.get("/.well-known/x402", (_req, res) => {
+  app.get("/.well-known/x402", (req, res) => {
+    const base = baseUrl(req);
     const accepts = [];
     if (cfg.EVM_ADDRESS) accepts.push({ scheme: "exact", price: formatPrice(MIN_USDC), network: cfg.EVM_NETWORK, payTo: cfg.EVM_ADDRESS });
     if (cfg.SVM_ADDRESS) accepts.push({ scheme: "exact", price: formatPrice(MIN_USDC), network: cfg.SVM_NETWORK, payTo: cfg.SVM_ADDRESS });
@@ -306,14 +316,14 @@ export async function createApp(overrides = {}) {
       service: { name: "outbid", description: "Pay-to-rank board. Rank is the bid." },
       resources: [
         {
-          url: "/bid",
+          url: `${base}/bid`,
           method: "POST",
           description:
             'Add USDC to a listing. Body {"url","amount","description"} — amount in dollars sets the 402 price, min 0.01. The settled amount is what gets credited.',
           accepts,
         },
       ],
-      free_resources: [{ url: "/api/board", method: "GET" }, { url: "/skill.md", method: "GET" }],
+      free_resources: [{ url: `${base}/api/board`, method: "GET" }, { url: `${base}/skill.md`, method: "GET" }],
     });
   });
 
@@ -321,31 +331,48 @@ export async function createApp(overrides = {}) {
   return app;
 }
 
-function skillMd(cfg) {
+function skillMd(cfg, base) {
   return `---
 name: outbid
-description: Pay USDC over x402 to rank a URL. Rank is the bid. Nothing else.
+description: Pay USDC over x402 to rank a URL on a public board. Rank is the bid. Nothing else.
+homepage: ${base}
+canonical_url: ${base}/skill.md
 ---
 
 # outbid
 
-Public board. Highest cumulative USDC on a URL is #1.
+Public pay-to-rank board. Highest cumulative USDC on a URL is #1. Checkout is
+HTTP 402 — no account, no API key. Every rank is backed by an on-chain
+settlement; nothing on this board can be ranked without paying.
 
 Free:
-- GET /api/board
-- GET /api/meta
-- GET /skill.md
+- GET ${base}/api/board — current ranking (JSON)
+- GET ${base}/api/meta — minimum bid, price to claim #1
+- GET ${base}/skill.md — this file
 
 Pay (HTTP 402):
-- POST /bid
+- POST ${base}/bid
 - JSON body: {"url":"https://example.com","amount":0.05,"description":"one line"}
 - amount is USDC dollars, min ${MIN_USDC}, whole cents. It sets the 402 price. (?amount= query also accepted.)
-- Unpaid request returns 402 with PAYMENT-REQUIRED.
+- Unpaid request returns 402 with a PAYMENT-REQUIRED header.
 - Retry with PAYMENT-SIGNATURE. Any x402 client works (wrapFetchWithPayment, agentcash, @x402/fetch).
 - What you PAY is what gets credited — the board records the settled amount, not the request's claim.
-- The settlement tx is echoed in the PAYMENT-RESPONSE header; the row appears on GET /api/board.
+- The settlement tx is echoed in the PAYMENT-RESPONSE header; the row appears on GET ${base}/api/board.
 
-Paying again on the same URL adds to its bid.
+Paying again on the same URL adds to its bid. Ranking a URL you don't control
+just advertises it — bids are non-refundable and non-transferable.
+
+Try it now (runnable as-is, no substitution needed):
+
+\`\`\`bash
+# see the board
+curl -s ${base}/api/board
+
+# get a 402 for a 1-cent bid (no payment happens)
+curl -si -X POST ${base}/bid \\
+  -H 'content-type: application/json' \\
+  -d '{"url":"https://example.com","amount":0.01,"description":"hello"}'
+\`\`\`
 
 ${cfg.dry ? "This instance has X402_DRY=1 and no wallet: POST /bid/dry records a bid without chain settlement (dev only)." : ""}
 `;
