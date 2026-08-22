@@ -98,3 +98,42 @@ test("POST /bid refuses when live 402 is not configured", async () => {
   // That is a footgun — refuse unless dry endpoint is used when live 402 is off.
   assert.equal(r.status, 403);
 });
+
+test("bid endpoints rate limit per IP with Retry-After", async () => {
+  const limitedFile = path.join(os.tmpdir(), `outbid-ratelimit-${process.pid}.json`);
+  const { createApp } = await import("../src/server.js");
+  const app = await createApp({
+    X402_DRY: "1",
+    EVM_ADDRESS: "",
+    SVM_ADDRESS: "",
+    DATA_FILE: limitedFile,
+    RATE_LIMIT_MAX: "3",
+    RATE_LIMIT_WINDOW_MS: "60000",
+  });
+  const srv = http.createServer(app);
+  await new Promise((resolve) => srv.listen(0, "127.0.0.1", resolve));
+  const b = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    const post = (ip) =>
+      fetch(`${b}/bid/dry`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "cf-connecting-ip": ip },
+        body: JSON.stringify({ url: "https://rl.example", amount: 0.01 }),
+      });
+    for (let i = 0; i < 3; i++) {
+      assert.equal((await post("1.2.3.4")).status, 200, `request ${i + 1} under the limit`);
+    }
+    const limited = await post("1.2.3.4");
+    assert.equal(limited.status, 429);
+    const body = await limited.json();
+    assert.ok(body.retry_after >= 1);
+    assert.ok(Number(limited.headers.get("retry-after")) >= 1);
+    // a different client IP is not limited
+    assert.equal((await post("5.6.7.8")).status, 200);
+    // GET endpoints are never limited
+    assert.equal((await fetch(`${b}/api/board`)).status, 200);
+  } finally {
+    srv.close();
+    fs.rmSync(limitedFile, { force: true });
+  }
+});

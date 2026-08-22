@@ -78,3 +78,28 @@ test("rank is cumulative bid, older wins ties", () => {
   assert.equal(board[1].rank, 2);
   fs.rmSync(file);
 });
+
+test("shorteners and chat/invite links are rejected", () => {
+  const blocked = [
+    "https://bit.ly/3xyz",
+    "http://t.co/abc",
+    "tinyurl.com/foo",
+    "https://goo.gl/maps1",
+    "https://is.gd/x",
+    "https://buff.ly/y",
+    "https://t.me/somegroup",
+    "https://discord.gg/abc123",
+    "https://discord.com/invite/abc123",
+    "https://wa.me/15551234567",
+    "https://www.bit.ly/sub",       // subdomain of a blocked host
+  ];
+  for (const u of blocked) {
+    const r = normalizeTarget(u);
+    assert.equal(r.ok, false, `${u} should be blocked`);
+    assert.match(r.error, /not allowed/);
+  }
+  // Non-invite discord and lookalike hosts stay allowed; @handles untouched.
+  assert.equal(normalizeTarget("https://discord.com/developers").ok, true);
+  assert.equal(normalizeTarget("https://notbit.ly.example.com/x").ok, true);
+  assert.equal(normalizeTarget("@someone").ok, true);
+});

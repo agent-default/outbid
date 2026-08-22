@@ -65,8 +65,9 @@ if (receipt) {
 }
 
 // The credit is written on settlement — show where the bid landed.
+// Match by the same normalization the board stores, not the raw argv string.
+const { normalizeTarget } = await import("../src/store.js");
+const target = normalizeTarget(url);
 const board = await (await fetch(`${base}/api/board`)).json();
-const mine = board.listings.find(
-  (l) => l.url === url || l.url === url.toLowerCase() || l.url.replace(/\/$/, "") === url.replace(/\/$/, ""),
-);
+const mine = target.ok ? board.listings.find((l) => l.url === target.display) : undefined;
 if (mine) console.log(`listed #${mine.rank} at $${mine.bid_usdc.toFixed(2)}`);

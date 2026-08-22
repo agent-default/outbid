@@ -33,6 +33,37 @@ function resolveConfig(overrides = {}) {
       path.join(__dirname, "..", "data", live ? "board.json" : "board.dry.json"),
     DEAD_LETTER_FILE:
       env.DEAD_LETTER_FILE || path.join(__dirname, "..", "data", "settled-uncredited.jsonl"),
+    RATE_LIMIT_MAX: Number(env.RATE_LIMIT_MAX || 30),
+    RATE_LIMIT_WINDOW_MS: Number(env.RATE_LIMIT_WINDOW_MS || 60_000),
+  };
+}
+
+// Sliding-window per-IP limiter for bid endpoints. Behind the Cloudflare
+// tunnel the real client is CF-Connecting-IP; fall back to the first
+// X-Forwarded-For hop, then the socket.
+function makeBidLimiter({ max, windowMs }) {
+  const hits = new Map(); // ip -> [timestamps]
+  return (req, res, next) => {
+    if (req.method !== "POST" || !req.path.startsWith("/bid")) return next();
+    const ip =
+      req.get("cf-connecting-ip") ||
+      (req.get("x-forwarded-for") || "").split(",")[0].trim() ||
+      req.socket.remoteAddress ||
+      "?";
+    const now = Date.now();
+    const recent = (hits.get(ip) || []).filter((t) => now - t < windowMs);
+    if (recent.length >= max) {
+      hits.set(ip, recent);
+      const retryAfter = Math.ceil((recent[0] + windowMs - now) / 1000);
+      res.set("Retry-After", String(retryAfter));
+      return res.status(429).json({ ok: false, error: "rate limited", retry_after: retryAfter });
+    }
+    recent.push(now);
+    hits.set(ip, recent);
+    if (hits.size > 10_000) {
+      for (const [k, v] of hits) if (!v.length || now - v[v.length - 1] > windowMs) hits.delete(k);
+    }
+    next();
   };
 }
 
@@ -202,6 +233,9 @@ export async function createApp(overrides = {}) {
   app.disable("x-powered-by");
   app.use(express.json({ limit: "32kb" }));
   app.use(express.static(publicDir));
+  // Before the payment middleware: unpaid 402 challenges are the cheap thing
+  // to spam, so they get limited too.
+  app.use(makeBidLimiter({ max: cfg.RATE_LIMIT_MAX, windowMs: cfg.RATE_LIMIT_WINDOW_MS }));
 
   const x402 = await mountX402(app);
 

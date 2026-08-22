@@ -24,6 +24,21 @@ export function formatPrice(dollars) {
   return `$${Number(dollars).toFixed(2)}`;
 }
 
+// Hosts that hide the real destination (shorteners) or are chat/invite
+// funnels. Exact host or any subdomain. discord.com is path-gated below.
+const BLOCKED_HOSTS = new Set([
+  "bit.ly", "t.co", "tinyurl.com", "goo.gl", "is.gd", "buff.ly",
+  "t.me", "discord.gg", "wa.me",
+]);
+
+function hostBlocked(hostname) {
+  const parts = hostname.split(".");
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (BLOCKED_HOSTS.has(parts.slice(i).join("."))) return true;
+  }
+  return false;
+}
+
 export function normalizeTarget(input) {
   if (typeof input !== "string") return { ok: false, error: "url is required" };
   const raw = input.trim();
@@ -49,6 +64,12 @@ export function normalizeTarget(input) {
   }
   url.hash = "";
   url.hostname = url.hostname.toLowerCase();
+  if (hostBlocked(url.hostname)) {
+    return { ok: false, error: "link shorteners and chat/invite links are not allowed" };
+  }
+  if (/(^|\.)discord\.com$/.test(url.hostname) && /^\/invite(\/|$)/i.test(url.pathname)) {
+    return { ok: false, error: "link shorteners and chat/invite links are not allowed" };
+  }
   for (const k of [...url.searchParams.keys()]) {
     if (/^(utm_|ref$|fbclid|gclid)/i.test(k)) url.searchParams.delete(k);
   }
