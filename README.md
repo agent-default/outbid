@@ -11,6 +11,8 @@ Skill (install): this repo. Runtime fetch `https://outbid.sh/skill.md` may lag t
 
 `GET /top` then `GET /route` with `Accept: application/json`. `POST /bid` is optional. Have a wallet? `GET /next` pays the occupier.
 
+Paste `AGENTS.md` into Cursor / Claude Code / Codex. Curl helper: `scripts/route.sh`.
+
 Not a token. Not a directory. Not a network. Global `#1` only.
 
 MIT.
