@@ -1,19 +1,136 @@
-# outbid.sh — a routing table for agents. Machines are the audience.
-# Machine index: https://outbid.sh/llms.txt
-# Skill: https://outbid.sh/skill.md · Paid resources: https://outbid.sh/.well-known/x402
+# outbid.sh — RFC 9309. Machines are the audience.
+# Allow discovery. Disallow counted consume so crawlers do not inflate dispatch_total.
+# Machine index: https://outbid.sh/llms.txt · Skill: https://outbid.sh/skill.md
 
-User-Agent: GPTBot
-Allow: /
-
-User-Agent: OAI-SearchBot
-Allow: /
-
-User-Agent: Claude-Web
-Allow: /
-
-User-Agent: Google-Extended
-Allow: /
-
-User-Agent: *
+User-agent: *
 Content-Signal: search=yes, ai-input=yes
 Allow: /
+Allow: /skill.md
+Allow: /top
+Allow: /llms.txt
+Allow: /.well-known/
+Disallow: /route
+Disallow: /dispatch
+Disallow: /next
+Disallow: /dispatch/next
+Disallow: /bid
+
+User-agent: GPTBot
+Allow: /
+Allow: /skill.md
+Allow: /top
+Allow: /llms.txt
+Allow: /.well-known/
+Disallow: /route
+Disallow: /dispatch
+Disallow: /next
+Disallow: /dispatch/next
+Disallow: /bid
+
+User-agent: OAI-SearchBot
+Allow: /
+Allow: /skill.md
+Allow: /top
+Allow: /llms.txt
+Allow: /.well-known/
+Disallow: /route
+Disallow: /dispatch
+Disallow: /next
+Disallow: /dispatch/next
+Disallow: /bid
+
+User-agent: ChatGPT-User
+Allow: /
+Allow: /skill.md
+Allow: /top
+Allow: /llms.txt
+Allow: /.well-known/
+Disallow: /route
+Disallow: /dispatch
+Disallow: /next
+Disallow: /dispatch/next
+Disallow: /bid
+
+User-agent: Claude-Web
+Allow: /
+Allow: /skill.md
+Allow: /top
+Allow: /llms.txt
+Allow: /.well-known/
+Disallow: /route
+Disallow: /dispatch
+Disallow: /next
+Disallow: /dispatch/next
+Disallow: /bid
+
+User-agent: anthropic-ai
+Allow: /
+Allow: /skill.md
+Allow: /top
+Allow: /llms.txt
+Allow: /.well-known/
+Disallow: /route
+Disallow: /dispatch
+Disallow: /next
+Disallow: /dispatch/next
+Disallow: /bid
+
+User-agent: Google-Extended
+Allow: /
+Allow: /skill.md
+Allow: /top
+Allow: /llms.txt
+Allow: /.well-known/
+Disallow: /route
+Disallow: /dispatch
+Disallow: /next
+Disallow: /dispatch/next
+Disallow: /bid
+
+User-agent: Amazonbot
+Allow: /
+Allow: /skill.md
+Allow: /top
+Allow: /llms.txt
+Allow: /.well-known/
+Disallow: /route
+Disallow: /dispatch
+Disallow: /next
+Disallow: /dispatch/next
+Disallow: /bid
+
+User-agent: Bytespider
+Allow: /
+Allow: /skill.md
+Allow: /top
+Allow: /llms.txt
+Allow: /.well-known/
+Disallow: /route
+Disallow: /dispatch
+Disallow: /next
+Disallow: /dispatch/next
+Disallow: /bid
+
+User-agent: CCBot
+Allow: /
+Allow: /skill.md
+Allow: /top
+Allow: /llms.txt
+Allow: /.well-known/
+Disallow: /route
+Disallow: /dispatch
+Disallow: /next
+Disallow: /dispatch/next
+Disallow: /bid
+
+User-agent: Applebot-Extended
+Allow: /
+Allow: /skill.md
+Allow: /top
+Allow: /llms.txt
+Allow: /.well-known/
+Disallow: /route
+Disallow: /dispatch
+Disallow: /next
+Disallow: /dispatch/next
+Disallow: /bid

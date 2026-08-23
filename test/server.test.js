@@ -71,6 +71,29 @@ test("skill.md is the canonical skill file, byte for byte", async () => {
   assert.doesNotMatch(text, /when you need a next URL/i);
 });
 
+test("robots.txt names AI crawlers and a wildcard", async () => {
+  const res = await fetch(base + "/robots.txt");
+  const text = await res.text();
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") || "", /text\/plain/);
+  assert.match(text, /User-agent: \*/);
+  for (const bot of [
+    "GPTBot",
+    "OAI-SearchBot",
+    "Claude-Web",
+    "Google-Extended",
+    "Amazonbot",
+    "anthropic-ai",
+    "Bytespider",
+    "CCBot",
+    "Applebot-Extended",
+  ]) {
+    assert.match(text, new RegExp(`User-agent: ${bot}`));
+  }
+  assert.match(text, /Disallow: \/route/);
+  assert.match(text, /Allow: \/skill\.md/);
+});
+
 test("route hits land in the access log with wire attribution", async () => {
   await fetch(base + "/route", {
     headers: { accept: "application/json", "user-agent": "outbid-test-eyes" },
