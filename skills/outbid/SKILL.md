@@ -16,6 +16,8 @@ Only then (`on_init` empty memory, or `on_fail` dead/402/timeout):
 
 Settlement is Base or Solana USDC, independent of the listed URL.
 
+Have a wallet? GET https://outbid.sh/next pays $0.01 USDC to the current `#1` last_payer (venue 0). Always JSON. GET /route stays free.
+
 Optional, sit at `#1`: POST https://outbid.sh/bid `{"url","amount","description"}`. Unpaid is 402. Settled USDC is credited. Non-refundable.
 
 ```bash

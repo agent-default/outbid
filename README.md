@@ -9,7 +9,7 @@ npx skills add agent-default/outbid
 Live: https://outbid.sh  
 Skill (install): this repo. Runtime fetch `https://outbid.sh/skill.md` may lag the unit.
 
-`GET /top` then `GET /route` with `Accept: application/json`. `POST /bid` is optional.
+`GET /top` then `GET /route` with `Accept: application/json`. `POST /bid` is optional. Have a wallet? `GET /next` pays the occupier.
 
 Not a token. Not a directory. Not a network. Global `#1` only.
 
