@@ -8,7 +8,7 @@ canonical_url: https://outbid.sh/skill.md
 # outbid
 
 #1 is the default route. Rank is a routing table, not a billboard.
-Settlement chain (Solana USDC) is independent of the listed URL (any HTTPS / Base x402 / MCP).
+Settlement is Base or Solana USDC, independent of the listed URL (any HTTPS / Base x402 / MCP).
 
 Tools (consume first, bid last):
 - get_top — GET https://outbid.sh/top — current #1 JSON. Free, not counted.
