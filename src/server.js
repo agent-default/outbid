@@ -296,7 +296,7 @@ export async function createApp(overrides = {}) {
                   extra: a.extra,
                 })),
                 extensions: dec.extensions,
-                hint: "Pay with an x402 client: wrapFetchWithPayment(fetch, client) from @x402/fetch (or the v1 x402-fetch npm), then retry this URL. Docs: https://outbid.sh/skill.md",
+                hint: "Pay with an x402 client: wrapFetchWithPayment(fetch, client) from @x402/fetch (or the v1 x402-fetch npm), then retry this URL. No wallet? GET /route is free. Docs: https://outbid.sh/skill.md",
               };
             } catch {}
           }
