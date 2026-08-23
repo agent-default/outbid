@@ -187,6 +187,32 @@ test("paid bid settles and the board row comes from settled facts", async () => 
   assert.match(row.last_tx, /^0xsettled/);
 });
 
+test("GET /next 402s to #1 last_payer; GET /route stays free", async () => {
+  const free = await fetch(`${base}/route`, { redirect: "manual" });
+  assert.equal(free.status, 302);
+  const res = await fetch(`${base}/next`, { redirect: "manual" });
+  assert.equal(res.status, 402);
+  const challenge = decodeChallenge(res);
+  assert.match(challenge.resource?.url || "", /\/next$/);
+  const accept = challenge.accepts?.[0];
+  assert.equal(accept.amount, "10000");
+  assert.equal(accept.payTo.toLowerCase(), payerAccount.address.toLowerCase());
+});
+
+test("paid GET /next dispatches without raising bid_usdc", async () => {
+  const before = await (await fetch(`${base}/api/board`)).json();
+  const bid = before.listings[0].bid_usdc;
+  const disp = before.dispatch_total;
+  const res = await paidFetch()(`${base}/next`, { headers: { accept: "application/json" } });
+  const text = await res.text();
+  assert.equal(res.status, 200, text);
+  const body = JSON.parse(text);
+  assert.equal(body.ok, true);
+  const board = await (await fetch(`${base}/api/board`)).json();
+  assert.equal(board.listings[0].bid_usdc, bid);
+  assert.equal(board.dispatch_total, disp + 1);
+});
+
 test("paying the same URL again adds the settled amount", async () => {
   const res = await paidFetch()(`${base}/bid`, {
     method: "POST",
@@ -196,7 +222,7 @@ test("paying the same URL again adds the settled amount", async () => {
   assert.equal(res.status, 200);
   const board = await (await fetch(`${base}/api/board`)).json();
   assert.equal(board.listings[0].bid_usdc, 0.15);
-  assert.equal(board.listings[0].last_tx, "0xsettled0002");
+  assert.equal(board.listings[0].last_tx, "0xsettled0003");
 });
 
 test("invalid body with a valid payment: 400, settlement canceled, nothing credited, money not taken", async () => {

@@ -155,7 +155,25 @@ export async function createApp(overrides = {}) {
     // url/description from the request body via the transport context.
     resourceServer.onAfterSettle(async (context) => {
       const request = context.transportContext?.request;
-      if (request?.path !== "/bid") return;
+      const path = request?.path;
+      if (path === "/next" || path === "/dispatch/next") {
+        if (context.result?.success === false) return;
+        const rec = {
+          tx: context.result?.transaction,
+          network: context.result?.network ?? context.requirements?.network,
+          payer: context.result?.payer,
+          atomic: String(context.result?.amount ?? context.requirements?.amount),
+        };
+        try {
+          const noted = store.recordNext(rec);
+          if (!noted.ok) deadLetter({ ...rec, path, error: noted.error });
+          else if (!noted.replay) console.log("next settled", rec.tx, rec.payer);
+        } catch (err) {
+          deadLetter({ ...rec, path, error: String(err) });
+        }
+        return;
+      }
+      if (path !== "/bid") return;
       // Exact-scheme SettleResponse has no `amount` (that's upto). The atomic
       // that was settled is requirements.amount. result.amount wins if present.
       const record = {
@@ -202,10 +220,35 @@ export async function createApp(overrides = {}) {
     if (cfg.SVM_ADDRESS) {
       paidAccepts.push({ scheme: "exact", price: priceFromContext, network: cfg.SVM_NETWORK, payTo: cfg.SVM_ADDRESS });
     }
+    const nextAccepts = [];
+    const nextPrice = formatPrice(MIN_USDC);
+    app.use((req, res, next) => {
+      if (req.path !== "/next" && req.path !== "/dispatch/next") return next();
+      nextAccepts.length = 0;
+      const p = store.ranked()[0]?.last_payer;
+      if (!p) return res.status(404).json({ ok: false, error: "no #1 last_payer" });
+      if (/^0x[a-fA-F0-9]{40}$/.test(p) && cfg.EVM_ADDRESS) {
+        nextAccepts.push({ scheme: "exact", price: nextPrice, network: cfg.EVM_NETWORK, payTo: p });
+      } else if (!p.startsWith("0x") && cfg.SVM_ADDRESS) {
+        nextAccepts.push({ scheme: "exact", price: nextPrice, network: cfg.SVM_NETWORK, payTo: p });
+      }
+      if (!nextAccepts.length) return res.status(404).json({ ok: false, error: "no #1 last_payer" });
+      next();
+    });
 
     app.use(
       paymentMiddleware(
         {
+          "GET /next": {
+            accepts: nextAccepts,
+            description: "Pay $0.01 USDC to current #1 last_payer for a counted dispatch. GET /route stays free.",
+            mimeType: "application/json",
+          },
+          "POST /dispatch/next": {
+            accepts: nextAccepts,
+            description: "Same as GET /next. Pay $0.01 to #1 last_payer. POST /dispatch stays free.",
+            mimeType: "application/json",
+          },
           "POST /bid": {
             accepts: paidAccepts,
             description:
@@ -267,7 +310,7 @@ export async function createApp(overrides = {}) {
   // Eyes: append-only wire log for the caller-facing paths, existing headers
   // only — no new protocol. Mounted before the limiter and the 402 middleware
   // so challenges and 429s leave a trace too. Never blocks or fails a reply.
-  const LOGGED_PATHS = new Set(["/route", "/dispatch", "/bid", "/skill.md"]);
+  const LOGGED_PATHS = new Set(["/route", "/dispatch", "/bid", "/skill.md", "/next", "/dispatch/next"]);
   fs.mkdirSync(path.dirname(cfg.DISPATCH_LOG), { recursive: true });
   app.use((req, res, next) => {
     if (LOGGED_PATHS.has(req.path)) {
@@ -370,6 +413,14 @@ export async function createApp(overrides = {}) {
 
   app.get("/route", (req, res) => sendRoute(req, res));
   app.post("/dispatch", (req, res) => sendRoute(req, res));
+  app.get("/next", (req, res) => {
+    if (!x402.live) return res.status(403).json({ ok: false, error: "live 402 disabled" });
+    return sendRoute(req, res);
+  });
+  app.post("/dispatch/next", (req, res) => {
+    if (!x402.live) return res.status(403).json({ ok: false, error: "live 402 disabled" });
+    return sendRoute(req, res);
+  });
 
   app.get("/go/:id", (req, res) => {
     const hit = store.click(req.params.id);
@@ -443,6 +494,18 @@ export async function createApp(overrides = {}) {
     res.type("text/markdown").send(skillText);
   });
 
+  function nextWellKnownAccepts() {
+    const p = store.ranked()[0]?.last_payer;
+    if (!p) return [];
+    if (/^0x[a-fA-F0-9]{40}$/.test(p) && cfg.EVM_ADDRESS) {
+      return [{ scheme: "exact", price: formatPrice(MIN_USDC), network: cfg.EVM_NETWORK, payTo: p }];
+    }
+    if (!p.startsWith("0x") && cfg.SVM_ADDRESS) {
+      return [{ scheme: "exact", price: formatPrice(MIN_USDC), network: cfg.SVM_NETWORK, payTo: p }];
+    }
+    return [];
+  }
+
   app.get("/.well-known/x402", (req, res) => {
     const base = baseUrl(req);
     const accepts = [];
@@ -462,6 +525,12 @@ export async function createApp(overrides = {}) {
           description:
             'Optional. Add USDC to a listing. Body {"url","amount","description"} — amount in dollars sets the 402 price, min 0.01. The settled amount is what gets credited.',
           accepts,
+        },
+        {
+          url: `${base}/next`,
+          method: "GET",
+          description: "Paid dispatch: $0.01 USDC to current #1 last_payer. GET /route stays free.",
+          accepts: nextWellKnownAccepts(),
         },
       ],
       free_resources: [

@@ -131,3 +131,17 @@ test("dispatchTop increments #1 dispatches, not clicks", () => {
   assert.equal(store.dispatchCount(), 2);
   fs.rmSync(file, { force: true });
 });
+
+test("recordNext logs a settle without raising bid_usdc", () => {
+  const file = path.join(os.tmpdir(), `outbid-next-${process.pid}-${Date.now()}.json`);
+  const store = createStore(file);
+  store.addBid({ url: "https://first.example", add_usdc: 0.05, payer: "0xabc" });
+  const r = store.recordNext({ atomic: "10000", payer: "0xdef", tx: "0xnext1", network: "eip155:8453" });
+  assert.equal(r.ok, true);
+  assert.equal(r.payment.kind, "next");
+  assert.equal(store.ranked()[0].bid_usdc, 0.05);
+  assert.equal(store.ranked()[0].dispatches, 0);
+  const replay = store.recordNext({ atomic: "10000", payer: "0xdef", tx: "0xnext1", network: "eip155:8453" });
+  assert.equal(replay.replay, true);
+  fs.rmSync(file, { force: true });
+});

@@ -237,6 +237,30 @@ export function createStore(filePath) {
     return Object.values(state.listings).reduce((n, row) => n + (row.dispatches || 0), 0);
   }
 
+  function recordNext({ atomic, payer = null, tx, network = null }) {
+    if (typeof tx !== "string" || !tx) return { ok: false, error: "settlement tx is required" };
+    if (!/^\d+$/.test(String(atomic))) return { ok: false, error: "atomic amount must be an integer string" };
+    const dollars = Math.round(Number(atomic) / 1e4) / 100;
+    if (!Number.isFinite(dollars) || dollars <= 0) return { ok: false, error: "settled amount is zero" };
+    const state = read();
+    const paymentKey = `${network || "?"}:${tx}`;
+    if (state.payments[paymentKey]) {
+      return { ok: true, replay: true, payment: state.payments[paymentKey] };
+    }
+    const top = ranked(state)[0];
+    state.payments[paymentKey] = {
+      kind: "next",
+      listing_id: top?.id ?? null,
+      usdc: dollars,
+      payer,
+      tx,
+      network,
+      at: new Date().toISOString(),
+    };
+    write(state);
+    return { ok: true, replay: false, payment: state.payments[paymentKey] };
+  }
+
   return {
     file,
     ranked,
@@ -247,6 +271,7 @@ export function createStore(filePath) {
     click,
     dispatchTop,
     dispatchCount,
+    recordNext,
     get: (id) => read().listings[id] || null,
     payments: () => read().payments,
   };

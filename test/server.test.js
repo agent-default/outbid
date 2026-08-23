@@ -313,6 +313,16 @@ test("bid endpoints rate limit per IP with Retry-After", async () => {
   }
 });
 
+test("GET /next is 403 when live 402 is off; GET /route stays unpaid", async () => {
+  const n = await json("/next");
+  assert.equal(n.status, 403);
+  const route = await fetch(base + "/route", { redirect: "manual" });
+  assert.equal(route.status, 302);
+  const well = await (await fetch(base + "/.well-known/x402")).json();
+  assert.ok((well.resources || []).some((r) => r.url.endsWith("/next")));
+  assert.ok((well.free_resources || []).some((r) => r.url.endsWith("/route")));
+});
+
 async function waitLog(file, pred, ms = 1000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
