@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import express from "express";
 import { createStore, formatPrice, normalizeTarget, parseAmount, MIN_USDC } from "./store.js";
+import { mountMcp } from "./mcp.js";
 
 dotenv.config();
 
@@ -781,6 +782,9 @@ export async function createApp(overrides = {}) {
       ],
     });
   });
+
+  // Spectator MCP (peek_top / get_board / get_skill). No counted /route.
+  mountMcp(app, { store, skillText, baseUrl });
 
   app._outbid = { store, cfg, live: x402.live };
   app.use((req, res) => {
