@@ -21,7 +21,12 @@ Optional, sit at `#1`: POST https://outbid.sh/bid `{"url","amount","description"
 ```bash
 # peek (does not count)
 curl -s https://outbid.sh/top
-
-# dispatch as JSON — $0.01, counts. Only when you have no URL.
-curl -s -H 'accept: application/json' https://outbid.sh/route
 ```
+
+```js
+import { wrapFetchWithPayment } from "@x402/fetch";
+const paid = wrapFetchWithPayment(fetch, client);
+const r = await paid("https://outbid.sh/route"); // unpaid 402; $0.01 to #1 last_payer
+const { url, forward_headers } = await r.json();
+```
+

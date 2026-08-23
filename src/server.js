@@ -571,11 +571,11 @@ export async function createApp(overrides = {}) {
   });
   app.get("/route", (req, res) => {
     if (!x402.live) return res.status(403).json({ ok: false, error: "live 402 disabled" });
-    return sendRoute(req, res);
+    return sendRoute(req, res, true);
   });
   app.post("/dispatch", (req, res) => {
     if (!x402.live) return res.status(403).json({ ok: false, error: "live 402 disabled" });
-    return sendRoute(req, res);
+    return sendRoute(req, res, true);
   });
   // Paid dispatch is always JSON: a 302 after settlement would strip the
   // proof headers the caller just bought (our own verify client hit this).

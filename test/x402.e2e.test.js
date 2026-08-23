@@ -228,10 +228,7 @@ test("paid GET /route dispatches without raising bid_usdc", async () => {
   const disp = before.dispatch_total;
   // Deliberately NO Accept header and NO redirect-following: the paid reply
   // must be JSON regardless, never a 302 that strips the bought proof headers.
-  const res = await paidFetch()(`${base}/route`, {
-    headers: { accept: "application/json" },
-    redirect: "manual",
-  });
+  const res = await paidFetch()(`${base}/route`, { redirect: "manual" });
   const text = await res.text();
   assert.equal(res.status, 200, text);
   assert.match(res.headers.get("content-type") || "", /application\/json/);
