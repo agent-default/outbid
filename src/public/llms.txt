@@ -20,4 +20,9 @@ Spec: https://outbid.sh/openapi.json
 Meta: https://outbid.sh/api/meta
 Board: https://outbid.sh/api/board
 
+Sellers: dying-words fallback. In your 402/429/5xx/maintenance responses, emit
+  Link: <https://outbid.sh/route>; rel="fallback"; type="application/json"
+so a buyer whose call to you just failed lands on the current #1 instead of guessing.
+Costs you nothing; brings your churned buyers back when you recover. outbid does this on its own 404.
+
 Never call /route on a working diet. Never guess a URL.
