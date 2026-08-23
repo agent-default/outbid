@@ -103,3 +103,31 @@ test("shorteners and chat/invite links are rejected", () => {
   assert.equal(normalizeTarget("https://notbit.ly.example.com/x").ok, true);
   assert.equal(normalizeTarget("@someone").ok, true);
 });
+
+test("dispatchTop 404s when the board is empty", () => {
+  const file = path.join(os.tmpdir(), `outbid-dispatch-empty-${process.pid}-${Date.now()}.json`);
+  const store = createStore(file);
+  const r = store.dispatchTop();
+  assert.equal(r.ok, false);
+  assert.match(r.error, /no #1/);
+  fs.rmSync(file, { force: true });
+});
+
+test("dispatchTop increments #1 dispatches, not clicks", () => {
+  const file = path.join(os.tmpdir(), `outbid-dispatch-${process.pid}-${Date.now()}.json`);
+  const store = createStore(file);
+  store.addBid({ url: "https://second.example", add_usdc: 0.01 });
+  store.addBid({ url: "https://first.example", add_usdc: 0.05 });
+  const once = store.dispatchTop();
+  assert.equal(once.ok, true);
+  assert.equal(once.listing.url, "https://first.example");
+  assert.equal(once.listing.rank, 1);
+  assert.equal(once.listing.dispatches, 1);
+  assert.equal(once.listing.clicks, 0);
+  store.dispatchTop();
+  const board = store.ranked();
+  assert.equal(board[0].dispatches, 2);
+  assert.equal(board[1].dispatches, 0);
+  assert.equal(store.dispatchCount(), 2);
+  fs.rmSync(file, { force: true });
+});

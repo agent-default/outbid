@@ -103,7 +103,12 @@ export function createStore(filePath) {
   function ranked(state = read()) {
     return Object.values(state.listings)
       .sort((a, b) => b.bid_usdc - a.bid_usdc || a.created_at.localeCompare(b.created_at))
-      .map((row, i) => ({ rank: i + 1, ...row }));
+      .map((row, i) => ({
+        ...row,
+        rank: i + 1,
+        clicks: row.clicks || 0,
+        dispatches: row.dispatches || 0,
+      }));
   }
 
   function topBid(state = read()) {
@@ -143,6 +148,7 @@ export function createStore(filePath) {
           description: desc,
           bid_usdc: amount.dollars,
           clicks: 0,
+          dispatches: 0,
           created_at: now,
           updated_at: now,
           last_payer: payer,
@@ -194,6 +200,7 @@ export function createStore(filePath) {
           description: desc,
           bid_usdc: dollars,
           clicks: 0,
+          dispatches: 0,
           created_at: now,
           updated_at: now,
           last_payer: payer,
@@ -210,9 +217,24 @@ export function createStore(filePath) {
     const state = read();
     const row = state.listings[id];
     if (!row) return { ok: false, error: "not found" };
-    row.clicks += 1;
+    row.clicks = (row.clicks || 0) + 1;
     write(state);
     return { ok: true, listing: row };
+  }
+
+  function dispatchTop() {
+    const state = read();
+    const board = ranked(state);
+    const top = board[0];
+    if (!top) return { ok: false, error: "no #1" };
+    const row = state.listings[top.id];
+    row.dispatches = (row.dispatches || 0) + 1;
+    write(state);
+    return { ok: true, listing: { ...top, dispatches: row.dispatches } };
+  }
+
+  function dispatchCount(state = read()) {
+    return Object.values(state.listings).reduce((n, row) => n + (row.dispatches || 0), 0);
   }
 
   return {
@@ -223,6 +245,8 @@ export function createStore(filePath) {
     addBid,
     credit,
     click,
+    dispatchTop,
+    dispatchCount,
     get: (id) => read().listings[id] || null,
     payments: () => read().payments,
   };

@@ -60,8 +60,14 @@ test("skill.md is served", async () => {
   const res = await fetch(base + "/skill.md");
   const text = await res.text();
   assert.equal(res.status, 200);
-  assert.match(text, /Rank is the bid/);
+  assert.match(text, /default route/);
   assert.match(text, /POST \/bid/);
+  assert.match(text, /get_top/);
+  assert.match(text, /Base or Solana USDC/);
+  assert.doesNotMatch(text, /Settlement chain \(Solana USDC\)/);
+  const top = text.indexOf("/top");
+  const bid = text.indexOf("/bid");
+  assert.ok(top !== -1 && bid !== -1 && top < bid, "skill.md must teach get_top before bid");
 });
 
 test("a configured wallet disables dry even if X402_DRY=1", async () => {
@@ -97,6 +103,148 @@ test("POST /bid refuses when live 402 is not configured", async () => {
   // No payTo configured: middleware is off, so this would write a free bid.
   // That is a footgun — refuse unless dry endpoint is used when live 402 is off.
   assert.equal(r.status, 403);
+});
+
+test("GET /route 404s on an empty board", async () => {
+  const data = path.join(os.tmpdir(), `outbid-route-empty-${process.pid}.json`);
+  const { createApp } = await import("../src/server.js");
+  const app = await createApp({
+    X402_DRY: "1",
+    EVM_ADDRESS: "",
+    SVM_ADDRESS: "",
+    DATA_FILE: data,
+  });
+  const srv = http.createServer(app);
+  await new Promise((resolve) => srv.listen(0, "127.0.0.1", resolve));
+  try {
+    const res = await fetch(`http://127.0.0.1:${srv.address().port}/route`, { redirect: "manual" });
+    assert.equal(res.status, 404);
+    const body = await res.json();
+    assert.match(body.error, /no #1/);
+  } finally {
+    srv.close();
+    fs.rmSync(data, { force: true });
+  }
+});
+
+test("GET /route 302s to #1 and counts a dispatch, not a click", async () => {
+  const data = path.join(os.tmpdir(), `outbid-route-${process.pid}.json`);
+  const { createApp } = await import("../src/server.js");
+  const app = await createApp({
+    X402_DRY: "1",
+    EVM_ADDRESS: "",
+    SVM_ADDRESS: "",
+    DATA_FILE: data,
+  });
+  const srv = http.createServer(app);
+  await new Promise((resolve) => srv.listen(0, "127.0.0.1", resolve));
+  const b = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    await fetch(`${b}/bid/dry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://route.example/x402", amount: 0.05, description: "seller" }),
+    });
+    const res = await fetch(`${b}/route`, { redirect: "manual" });
+    assert.equal(res.status, 302);
+    assert.equal(res.headers.get("location"), "https://route.example/x402");
+    assert.equal(res.headers.get("x-outbid-rank"), "1");
+    assert.ok(res.headers.get("x-outbid-listing"));
+    assert.match(res.headers.get("x-outbid-note") || "", /you were sent here because you were #1/i);
+    const board = await (await fetch(`${b}/api/board`)).json();
+    assert.equal(board.listings[0].dispatches, 1);
+    assert.equal(board.listings[0].clicks, 0);
+    assert.equal(board.dispatch_total, 1);
+    const skill = await (await fetch(`${b}/skill.md`)).text();
+    assert.match(skill, /GET .*\/route/);
+    assert.match(skill, /default routing table|#1 is the default route/i);
+    assert.match(skill, /forward_headers/);
+    const idx = skill.indexOf("/route");
+    const bid = skill.lastIndexOf("/bid");
+    assert.ok(idx !== -1 && bid !== -1 && idx < bid, "skill.md must teach route before bid");
+  } finally {
+    srv.close();
+    fs.rmSync(data, { force: true });
+  }
+});
+
+test("GET /top peeks at #1 without counting a dispatch", async () => {
+  const data = path.join(os.tmpdir(), `outbid-top-${process.pid}.json`);
+  const { createApp } = await import("../src/server.js");
+  const app = await createApp({
+    X402_DRY: "1",
+    EVM_ADDRESS: "",
+    SVM_ADDRESS: "",
+    DATA_FILE: data,
+  });
+  const srv = http.createServer(app);
+  await new Promise((resolve) => srv.listen(0, "127.0.0.1", resolve));
+  const b = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    const empty = await fetch(`${b}/top`);
+    assert.equal(empty.status, 404);
+    await fetch(`${b}/bid/dry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://top.example/mcp", amount: 0.05 }),
+    });
+    const peek = await (await fetch(`${b}/top`)).json();
+    assert.equal(peek.ok, true);
+    assert.equal(peek.url, "https://top.example/mcp");
+    assert.equal(peek.rank, 1);
+    const board = await (await fetch(`${b}/api/board`)).json();
+    assert.equal(board.listings[0].dispatches, 0);
+    assert.equal(board.dispatch_total, 0);
+  } finally {
+    srv.close();
+    fs.rmSync(data, { force: true });
+  }
+});
+
+test("POST /dispatch 302s; Accept json returns URL + headers to forward", async () => {
+  const data = path.join(os.tmpdir(), `outbid-dispatch-http-${process.pid}.json`);
+  const { createApp } = await import("../src/server.js");
+  const app = await createApp({
+    X402_DRY: "1",
+    EVM_ADDRESS: "",
+    SVM_ADDRESS: "",
+    DATA_FILE: data,
+  });
+  const srv = http.createServer(app);
+  await new Promise((resolve) => srv.listen(0, "127.0.0.1", resolve));
+  const b = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    await fetch(`${b}/bid/dry`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://seller.example/x402", amount: 0.05 }),
+    });
+    const redir = await fetch(`${b}/dispatch`, { method: "POST", redirect: "manual" });
+    assert.equal(redir.status, 302);
+    assert.equal(redir.headers.get("location"), "https://seller.example/x402");
+    const json = await fetch(`${b}/route`, {
+      headers: { accept: "application/json" },
+    });
+    assert.equal(json.status, 200);
+    const body = await json.json();
+    assert.equal(body.url, "https://seller.example/x402");
+    assert.equal(body.forward_headers["X-Outbid-Rank"], "1");
+    assert.match(body.forward_headers["X-Outbid-Note"], /you were sent here because you were #1/i);
+    const board = await (await fetch(`${b}/api/board`)).json();
+    assert.equal(board.dispatch_total, 2);
+    assert.equal(board.listings[0].clicks, 0);
+    const well = await (await fetch(`${b}/.well-known/x402`)).json();
+    const free = (well.free_resources || []).map((r) => `${r.method} ${new URL(r.url).pathname}`);
+    assert.ok(free.includes("GET /top"));
+    assert.ok(free.includes("POST /dispatch"));
+    const topIdx = free.findIndex((x) => x === "GET /top");
+    const bidPaid = (well.resources || []).some((r) => r.url.endsWith("/bid"));
+    assert.ok(bidPaid);
+    assert.ok(topIdx === 0, "get_top must be the first free resource");
+  } finally {
+    srv.close();
+    fs.rmSync(data, { force: true });
+  }
 });
 
 test("bid endpoints rate limit per IP with Retry-After", async () => {

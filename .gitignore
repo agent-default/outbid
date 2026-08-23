@@ -1,6 +1,18 @@
 data/
+research/x402scan/*.json
 .env
 .env.*
 !.env.example
 *.log
 node_modules/
+
+# Local-only (never in the public agent-default/outbid repo; mask + internal strategy)
+CLAUDE.md
+AGENTS.md
+GRAPH.md
+PHASE-2.md
+ATTRACT.md
+memory/
+graph/
+research/
+.grok/

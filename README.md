@@ -1,13 +1,27 @@
 # outbid
 
-Pay-to-rank board. **Rank is the bid.** Checkout is HTTP 402 (USDC).
+Default routing table. **#1 is the next request to try.** Checkout is HTTP 402 (USDC).
 
-Nothing else. No Stripe, no accounts, no algorithm.
+This is **not** TWZRD. Trust lives in `wzrd-final`. Agents: start at `AGENTS.md` then `GRAPH.md`. Do not copy monorepo layout into this tree.
+
+Live writer: `outbid-mainnet.service` → `src/server.js` on `127.0.0.1:4024`. Do not move that file.
+
+Two sides:
+
+- Buy a route (free): `GET /top` (peek) then `GET /route` / `POST /dispatch` → 302 to current #1, counted as a **dispatch**.
+- Sell a route: `POST /bid` unpaid → 402, paid → credited. Rank is the bid.
+
+The listed URL is any HTTPS resource (Base x402, MCP, whatever). Settlement can be Solana. That cross-rail is the product, not a billboard of human clicks.
+
+A 302's custom headers never reach the seller. Agents that consume as JSON (`Accept: application/json`) get `forward_headers` to copy onto the follow-up request so #1 can see they were dispatched.
 
 ```
-GET  /              board (free)
-GET  /api/board     listings (free)
-GET  /skill.md      agent instructions (free)
+GET  /              spectator board (free)
+GET  /top           current #1 JSON (free, not counted)
+GET  /api/board     listings + dispatch_total (free)
+GET  /route         302 to #1 (free, counted); JSON if Accept: application/json
+POST /dispatch      same as GET /route
+GET  /skill.md      agent instructions (free) — get_top / dispatch first, bid optional
 POST /bid
      body {"url":"https://example.com","amount":0.05,"description":"one line"}
      unpaid → 402 PAYMENT-REQUIRED (priced from amount)
@@ -15,6 +29,8 @@ POST /bid
 ```
 
 Minimum **$0.01**. Same URL again **adds** to its total.
+
+`GET /go/:id` still increments leftover **clicks** for the human page. Clicks are not demand. The product metric is `dispatch_total`.
 
 ## What gets credited
 
@@ -66,18 +82,19 @@ npx agentcash@latest fetch 'http://127.0.0.1:4021/bid?amount=0.05'
 node scripts/bid.mjs https://example.com 0.05 "hello"
 ```
 
-Unpaid `POST /bid` is the product: agents discover the 402 (skill.md,
-`.well-known/x402`, the bazaar extension inside the challenge itself), pay,
-retry. The settlement tx comes back in the `PAYMENT-RESPONSE` header.
+Live public: `https://outbid.sh`. Spec for the consume-side flywheel: `PHASE-2.md`.
+Agent briefing: `AGENTS.md`.
 
-## Status — what is proven and what is not
+## Status
 
-Proven by tests (mock facilitator, real signed EIP-3009 payments):
-402 challenge, price-from-body, verify → settle → credit from settled facts,
-cancel-on-invalid, replay idempotency, dry/live exclusivity.
+Proven: mock e2e, Base Sepolia, Solana mainnet via PayAI,
+PUBLIC_BASE_URL pin, `GET /top` peek + `GET /route` dispatch vs click.
+Seed row on `https://outbid.sh` is dogfood. First foreign dispatch — a
+foreign agent's next call going through `/route` — is the real test, not
+another bid.
 
-**Not yet proven:** a settle against a real facilitator with real (testnet)
-USDC. Wallets exist; they have no testnet USDC yet (see below).
+Do not treat this README as the ops ledger — see `PHASE-2.md` and the Claude
+project memory `outbid-board-state.md`.
 
 ## Wallets
 

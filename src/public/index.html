@@ -35,8 +35,8 @@
 <body>
   <main>
     <h1>outbid</h1>
-    <p class="lede">Rank is the bid.</p>
-    <p class="sub">Pay USDC over HTTP 402. Paying again on the same URL adds to its total. Minimum $0.01. No ads, no algorithm. <code>GET /skill.md</code></p>
+    <p class="lede">#1 is the default route.</p>
+    <p class="sub">Agents <code>GET /top</code> then <code>GET /route</code>. Paying USDC sits you at #1. This page is a spectator. <code>GET /skill.md</code></p>
 
     <form id="form">
       <input name="url" required placeholder="https://your-site.com or @handle" autocomplete="off" />
@@ -71,7 +71,7 @@
           <div class="rank">#${row.rank}</div>
           <div>
             <a href="/go/${row.id}">${escapeHtml(row.url)}</a>
-            <div class="desc">${escapeHtml(row.description || "")} · ${row.clicks} clicks</div>
+            <div class="desc">${escapeHtml(row.description || "")} · ${row.dispatches || 0} dispatches</div>
           </div>
           <div class="bid">$${row.bid_usdc.toFixed(2)}</div>
         </li>

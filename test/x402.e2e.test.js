@@ -124,6 +124,40 @@ test("unpaid POST /bid returns a 402 priced from the body amount", async () => {
   const bazaarKey = Object.keys(challenge.extensions || {}).find((k) => k.includes("bazaar"));
   const bazaar = challenge.extensions?.[bazaarKey];
   assert.ok(JSON.stringify(bazaar).includes('"amount"'), "bazaar declaration must describe amount");
+  // default (no PUBLIC_BASE_URL): x402 builds resource.url from req.protocol + host
+  assert.match(challenge.resource?.url || "", /^http:\/\/127\.0\.0\.1:\d+\/bid$/);
+});
+
+test("PUBLIC_BASE_URL forces 402 resource.url scheme+host (leak #6)", async () => {
+  const data = path.join(os.tmpdir(), `outbid-e2e-pubbase-${process.pid}.json`);
+  const { createApp } = await import("../src/server.js");
+  const pubApp = await createApp({
+    EVM_ADDRESS: RECEIVER,
+    SVM_ADDRESS: "",
+    FACILITATOR_URL: `http://127.0.0.1:${facilitator.address().port}`,
+    DATA_FILE: data,
+    PUBLIC_BASE_URL: "https://outbid.sh",
+  });
+  const srv = http.createServer(pubApp);
+  await new Promise((resolve) => srv.listen(0, "127.0.0.1", resolve));
+  try {
+    const res = await fetch(`http://127.0.0.1:${srv.address().port}/bid`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://example.com", amount: 0.01 }),
+    });
+    assert.equal(res.status, 402);
+    const challenge = decodeChallenge(res);
+    assert.equal(challenge.resource?.url, "https://outbid.sh/bid");
+    const blob = JSON.stringify(challenge);
+    assert.equal(blob.includes("http://"), false);
+    assert.equal(blob.includes("127.0.0.1"), false);
+    const skill = await (await fetch(`http://127.0.0.1:${srv.address().port}/skill.md`)).text();
+    assert.match(skill, /POST https:\/\/outbid\.sh\/bid/);
+  } finally {
+    srv.close();
+    fs.rmSync(data, { force: true });
+  }
 });
 
 test("paid bid settles and the board row comes from settled facts", async () => {
