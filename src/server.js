@@ -450,7 +450,7 @@ export async function createApp(overrides = {}) {
   app.use(express.json({ limit: "32kb" }));
   const homeMd = fs.readFileSync(path.join(publicDir, "llms.txt"), "utf8");
   app.get("/", (req, res, next) => {
-    res.vary("Accept");
+    res.set("Vary", "Accept, Accept-Encoding");
     res.append("Link", '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"');
     res.append("Link", '</.well-known/x402>; rel="service-desc"; type="application/json"');
     res.append("Link", '</skill.md>; rel="service-doc"; type="text/markdown"');
@@ -820,17 +820,17 @@ export async function createApp(overrides = {}) {
 
   app._outbid = { store, cfg, live: x402.live };
   app.use((req, res) => {
-    res.vary("Accept");
-    if (req.accepts(["application/json", "text/markdown"]) === "application/json") {
+    res.set("Vary", "Accept, Accept-Encoding");
+    if (req.accepts(["text/markdown", "application/json"]) === "application/json") {
       return res.status(404).json({
         ok: false,
         error: "not found",
         code: "not_found",
-        hint: "GET /llms.txt, /skill.md, /openapi.json, or /top",
+        hint: "GET /llms.txt, /skill.md, /sitemap.xml, /openapi.json, or /top",
       });
     }
     res.status(404).type("text/markdown; charset=utf-8").send(
-      "# 404\n\nNo such path.\n\n- GET /llms.txt\n- GET /skill.md\n- GET /openapi.json\n- GET /top\n",
+      "# 404\n\nNo such path.\n\n- GET /llms.txt\n- GET /skill.md\n- GET /sitemap.xml\n- GET /openapi.json\n- GET /top\n",
     );
   });
   return app;

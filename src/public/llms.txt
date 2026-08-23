@@ -16,6 +16,7 @@ Auth: none — no accounts, no keys, no OAuth. The payment is the auth (x402).
 
 Skill: https://outbid.sh/skill.md
 Install: npx skills add agent-default/outbid
+Spec: https://outbid.sh/openapi.json
 Meta: https://outbid.sh/api/meta
 Board: https://outbid.sh/api/board
 
