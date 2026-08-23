@@ -35,6 +35,7 @@ function resolveConfig(overrides = {}) {
       env.DEAD_LETTER_FILE || path.join(__dirname, "..", "data", "settled-uncredited.jsonl"),
     RATE_LIMIT_MAX: Number(env.RATE_LIMIT_MAX || 30),
     RATE_LIMIT_WINDOW_MS: Number(env.RATE_LIMIT_WINDOW_MS || 60_000),
+    PUBLIC_BASE_URL: (env.PUBLIC_BASE_URL || "").replace(/\/+$/, "") || null,
   };
 }
 
@@ -297,6 +298,9 @@ export async function createApp(overrides = {}) {
   // header carries the public name, so served docs are runnable from anywhere
   // with zero substitution — no relative paths, no placeholders (paste-traps).
   function baseUrl(req) {
+    // A configured public base wins over the request host — behind a proxy the
+    // Host header may be the origin (ts.net), which we do not want in docs.
+    if (cfg.PUBLIC_BASE_URL) return cfg.PUBLIC_BASE_URL;
     const proto = req.get("x-forwarded-proto") || req.protocol || "http";
     const host = req.get("x-forwarded-host") || req.get("host") || `${cfg.HOST}:${cfg.PORT}`;
     return `${proto}://${host}`;
