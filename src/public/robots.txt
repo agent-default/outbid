@@ -3,7 +3,7 @@
 # Machine index: https://outbid.sh/llms.txt · Skill: https://outbid.sh/skill.md
 
 User-agent: *
-Content-Signal: search=yes, ai-input=yes
+Content-Signal: ai-train=no, search=yes, ai-input=yes
 Allow: /
 Allow: /skill.md
 Allow: /top
