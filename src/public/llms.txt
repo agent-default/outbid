@@ -12,6 +12,8 @@ Highest bid wins the seat. Last payer collects GET /next fees. Those are differe
 Optional, sit at #1: POST https://outbid.sh/bid {"url","amount","description"}
 Unpaid is 402. Settled USDC on Base or Solana is credited. Non-refundable. Amount must meet claim_1_for to become #1.
 
+Auth: none — no accounts, no keys, no OAuth. The payment is the auth (x402).
+
 Skill: https://outbid.sh/skill.md
 Install: npx skills add agent-default/outbid
 Meta: https://outbid.sh/api/meta

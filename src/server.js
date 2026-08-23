@@ -358,7 +358,7 @@ export async function createApp(overrides = {}) {
   // Eyes: append-only wire log for the caller-facing paths, existing headers
   // only — no new protocol. Mounted before the limiter and the 402 middleware
   // so challenges and 429s leave a trace too. Never blocks or fails a reply.
-  const LOGGED_PATHS = new Set(["/route", "/dispatch", "/bid", "/skill.md", "/next", "/dispatch/next", "/.well-known/x402"]);
+  const LOGGED_PATHS = new Set(["/route", "/dispatch", "/bid", "/skill.md", "/next", "/dispatch/next", "/.well-known/x402", "/.well-known/api-catalog"]);
   fs.mkdirSync(path.dirname(cfg.DISPATCH_LOG), { recursive: true });
   app.use((req, res, next) => {
     if (LOGGED_PATHS.has(req.path)) {
@@ -584,6 +584,23 @@ export async function createApp(overrides = {}) {
     }
     return [];
   }
+
+  // RFC 9727 API catalog: honest linkset over surfaces that exist. No OAuth
+  // discovery on purpose — there is no auth server to describe; the payment
+  // is the auth (x402), discoverable via the 402 challenge itself.
+  app.get("/.well-known/api-catalog", (req, res) => {
+    const base = baseUrl(req);
+    res.set("Content-Type", "application/linkset+json").send(JSON.stringify({
+      linkset: [
+        {
+          anchor: `${base}/`,
+          "service-desc": [{ href: `${base}/.well-known/x402`, type: "application/json" }],
+          "service-doc": [{ href: `${base}/skill.md`, type: "text/markdown" }],
+          status: [{ href: `${base}/health` }],
+        },
+      ],
+    }));
+  });
 
   // Same handler on both paths. Do not drop a snapshot in public/ — GET /next
   // payTo is current #1 last_payer and would go stale. Express req.url rewrite
