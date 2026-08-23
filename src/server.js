@@ -851,9 +851,10 @@ export async function createApp(overrides = {}) {
   app.use((req, res) => {
     res.set("Vary", "Accept, Accept-Encoding");
     // Dying-words self-adoption: our own dead-end carries the fallback the
-    // spec asks sellers to emit — a lost caller is handed the route primitive,
-    // machine-readable (Link rel=fallback), not just prose.
-    const fb = `${baseUrl(req)}/route`;
+    // spec asks sellers to emit. It points at FREE /top (peek #1's URL, not
+    // counted) — /route is now the $0.01 paid dispatch, so first contact must
+    // stay free or a churned buyer hits a paywall sight-unseen.
+    const fb = `${baseUrl(req)}/top`;
     res.set("Link", `<${fb}>; rel="fallback"; type="application/json"`);
     if (req.accepts(["text/markdown", "application/json"]) === "application/json") {
       return res.status(404).json({
@@ -861,11 +862,11 @@ export async function createApp(overrides = {}) {
         error: "not found",
         code: "not_found",
         fallback: fb,
-        hint: "GET /llms.txt, /skill.md, /sitemap.xml, /openapi.json, or /top",
+        hint: "GET /top (free peek), then /route ($0.01 dispatch), /llms.txt, /skill.md",
       });
     }
     res.status(404).type("text/markdown; charset=utf-8").send(
-      `# 404\n\nNo such path.\n\nFallback: GET ${fb} with Accept: application/json\n\n- GET /llms.txt\n- GET /skill.md\n- GET /sitemap.xml\n- GET /openapi.json\n- GET /top\n`,
+      `# 404\n\nNo such path.\n\nFallback: GET ${fb} (free peek at #1), then /route for a paid dispatch.\n\n- GET /top\n- GET /llms.txt\n- GET /skill.md\n- GET /sitemap.xml\n- GET /openapi.json\n`,
     );
   });
   return app;

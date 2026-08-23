@@ -335,6 +335,30 @@ test("HEAD /bid is 200 with Allow: POST for catalog health checks", async () => 
   assert.equal(res.headers.get("allow"), "POST");
 });
 
+test("agent-readiness doors: api-catalog linkset, robots, llms auth line", async () => {
+  const cat = await fetch(base + "/.well-known/api-catalog");
+  assert.equal(cat.status, 200);
+  assert.match(cat.headers.get("content-type") || "", /linkset\+json/);
+  const ls = (await cat.json()).linkset[0];
+  assert.ok(ls.anchor.endsWith("/"), "anchor");
+  assert.ok(ls["service-desc"][0].href.endsWith("/.well-known/x402"), "service-desc");
+  assert.ok(ls["service-doc"][0].href.endsWith("/skill.md"), "service-doc");
+  assert.ok(ls.status[0].href.endsWith("/health"), "status");
+  const robots = await (await fetch(base + "/robots.txt")).text();
+  assert.match(robots, /User-agent: \*/);
+  const llms = await (await fetch(base + "/llms.txt")).text();
+  assert.match(llms, /Auth: none/);
+});
+
+test("dying-words: 404 fallback points at FREE /top, not paid /route", async () => {
+  const res = await fetch(base + "/no-such-path", { headers: { accept: "application/json" } });
+  assert.equal(res.status, 404);
+  assert.match(res.headers.get("link") || "", /rel="fallback"/);
+  assert.match(res.headers.get("link") || "", /\/top>/);
+  const body = await res.json();
+  assert.ok(body.fallback.endsWith("/top"), "fallback must be free /top, not paid /route");
+});
+
 test("GET /bid is 405 with Allow: POST, not 404", async () => {
   const res = await fetch(base + "/bid");
   assert.equal(res.status, 405);
