@@ -625,6 +625,51 @@ export async function createApp(overrides = {}) {
     });
   });
 
+  // ARD / ai-catalog: real doors only. No MCP, A2A, or ACP — we do not have those.
+  app.get("/.well-known/ai-catalog.json", (req, res) => {
+    const base = baseUrl(req);
+    res.set("Access-Control-Allow-Origin", "*");
+    res.json({
+      specVersion: "1.0",
+      host: { displayName: "outbid", identifier: "did:web:outbid.sh" },
+      entries: [
+        {
+          identifier: "urn:air:outbid.sh:skill:outbid",
+          displayName: "outbid skill",
+          type: "text/markdown",
+          url: `${base}/skill.md`,
+          representativeQueries: [
+            "what is the next URL when the seller died",
+            "npx skills add agent-default/outbid",
+            "GET /top then GET /route",
+          ],
+        },
+        {
+          identifier: "urn:air:outbid.sh:x402:well-known",
+          displayName: "outbid x402",
+          type: "application/json",
+          url: `${base}/.well-known/x402`,
+          representativeQueries: [
+            "pay USDC to sit at #1 on outbid",
+            "GET /next 402 paid dispatch",
+            "x402 POST /bid",
+          ],
+        },
+        {
+          identifier: "urn:air:outbid.sh:docs:llms",
+          displayName: "outbid llms.txt",
+          type: "text/plain",
+          url: `${base}/llms.txt`,
+          representativeQueries: [
+            "fallback next URL for agents",
+            "outbid.sh skill",
+            "#1 is the highest settled bid",
+          ],
+        },
+      ],
+    });
+  });
+
   app._outbid = { store, cfg, live: x402.live };
   return app;
 }

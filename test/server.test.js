@@ -355,6 +355,27 @@ test("GET /next is 403 when live 402 is off; GET /route stays unpaid", async () 
   assert.ok((well.free_resources || []).some((r) => r.url.endsWith("/route")));
 });
 
+test("ARD ai-catalog.json lists real doors only", async () => {
+  const res = await fetch(base + "/.well-known/ai-catalog.json");
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") || "", /json/);
+  assert.equal(res.headers.get("access-control-allow-origin"), "*");
+  const cat = await res.json();
+  assert.ok(cat.specVersion);
+  assert.ok(cat.host?.displayName && cat.host?.identifier);
+  assert.ok(Array.isArray(cat.entries) && cat.entries.length >= 2);
+  for (const e of cat.entries) {
+    assert.match(e.identifier, /^urn:air:outbid\.sh:/);
+    assert.ok(e.displayName && e.type && e.url);
+    assert.equal(e.data, undefined);
+    assert.ok(e.representativeQueries.length >= 2 && e.representativeQueries.length <= 5);
+  }
+  const ids = cat.entries.map((e) => e.identifier);
+  assert.ok(ids.some((id) => id.includes(":skill:")));
+  assert.ok(ids.some((id) => id.includes(":x402:")));
+  assert.ok(!ids.some((id) => /mcp|acp|a2a/i.test(id)));
+});
+
 async function waitLog(file, pred, ms = 1000) {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
