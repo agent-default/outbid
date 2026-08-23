@@ -522,7 +522,10 @@ export async function createApp(overrides = {}) {
     return [];
   }
 
-  app.get("/.well-known/x402", (req, res) => {
+  // Same handler on both paths. Do not drop a snapshot in public/ — GET /next
+  // payTo is current #1 last_payer and would go stale. Express req.url rewrite
+  // does not re-match routes; bind the function once.
+  app.get(["/.well-known/x402", "/.well-known/x402.json"], (req, res) => {
     const base = baseUrl(req);
     const accepts = [];
     if (cfg.EVM_ADDRESS) accepts.push({ scheme: "exact", price: formatPrice(MIN_USDC), network: cfg.EVM_NETWORK, payTo: cfg.EVM_ADDRESS });

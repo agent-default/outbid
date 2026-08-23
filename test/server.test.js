@@ -328,6 +328,8 @@ test("GET /next is 403 when live 402 is off; GET /route stays unpaid", async () 
   const route = await fetch(base + "/route", { redirect: "manual" });
   assert.equal(route.status, 302);
   const well = await (await fetch(base + "/.well-known/x402")).json();
+  const wellJson = await (await fetch(base + "/.well-known/x402.json")).json();
+  assert.deepEqual(wellJson, well, "/.well-known/x402.json must be the same handler, not a snapshot");
   assert.ok((well.resources || []).some((r) => r.url.endsWith("/next")));
   assert.ok((well.free_resources || []).some((r) => r.url.endsWith("/route")));
 });
