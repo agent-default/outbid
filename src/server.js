@@ -249,6 +249,19 @@ export async function createApp(overrides = {}) {
             accepts: nextAccepts,
             description: "Pay $0.01 USDC to current #1 last_payer for a counted dispatch. GET /route stays free.",
             mimeType: "application/json",
+            extensions: {
+              ...declareDiscoveryExtension({
+                method: "GET",
+                output: {
+                  example: {
+                    ok: true,
+                    rank: 1,
+                    url: "https://example.com",
+                    forward_headers: { "X-Outbid-Rank": "1" },
+                  },
+                },
+              }),
+            },
           },
           "POST /dispatch/next": {
             accepts: nextAccepts,
@@ -417,6 +430,15 @@ export async function createApp(overrides = {}) {
     });
   });
 
+  // HEAD must never count a dispatch or leak the proof headers: Express
+  // aliases HEAD onto app.get, and the payment middleware matches GET only,
+  // so without these routes a HEAD /next got the paid product free (VirusTotal
+  // did, 09:53Z). Explicit HEAD routes win by registration order.
+  app.head("/route", (_req, res) => res.status(200).end());
+  app.head("/next", (_req, res) => {
+    res.set("X-Outbid-Note", "GET with x402 payment - see /.well-known/x402");
+    res.status(402).end();
+  });
   app.get("/route", (req, res) => sendRoute(req, res));
   app.post("/dispatch", (req, res) => sendRoute(req, res));
   // Paid dispatch is always JSON: a 302 after settlement would strip the
@@ -445,6 +467,12 @@ export async function createApp(overrides = {}) {
     res.set("Allow", "POST");
     res.set("X-Outbid-Note", "POST with x402 payment - see /.well-known/x402");
     res.status(200).end();
+  });
+  // Health checkers that GET before HEADing (uvd-bazaar-health) read a 404 as
+  // down. 405 with Allow is the honest answer for a POST-only paid route.
+  app.get("/bid", (_req, res) => {
+    res.set("Allow", "POST");
+    res.status(405).json({ ok: false, error: "POST with x402 payment - see /.well-known/x402" });
   });
 
   // Live path: by the time this handler runs the payment is VERIFIED but not

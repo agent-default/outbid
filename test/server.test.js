@@ -322,6 +322,24 @@ test("HEAD /bid is 200 with Allow: POST for catalog health checks", async () => 
   assert.equal(res.headers.get("allow"), "POST");
 });
 
+test("GET /bid is 405 with Allow: POST, not 404", async () => {
+  const res = await fetch(base + "/bid");
+  assert.equal(res.status, 405);
+  assert.equal(res.headers.get("allow"), "POST");
+});
+
+test("HEAD never counts a dispatch or leaks proof headers", async () => {
+  const before = (await json("/api/meta")).body.dispatch_total;
+  const r = await fetch(base + "/route", { method: "HEAD" });
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("x-outbid-rank"), null, "proof headers must not ride HEAD");
+  const n = await fetch(base + "/next", { method: "HEAD" });
+  assert.equal(n.status, 402);
+  assert.equal(n.headers.get("x-outbid-rank"), null);
+  const after = (await json("/api/meta")).body.dispatch_total;
+  assert.equal(after, before, "HEAD must not count");
+});
+
 test("GET /next is 403 when live 402 is off; GET /route stays unpaid", async () => {
   const n = await json("/next");
   assert.equal(n.status, 403);
