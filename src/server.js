@@ -232,6 +232,23 @@ export async function createApp(overrides = {}) {
 
   const app = express();
   app.disable("x-powered-by");
+  // Only our own reverse proxy (Tailscale funnel / Vercel) can reach the
+  // loopback port, so trust its forwarding headers: this makes req.protocol
+  // honor x-forwarded-proto (https, not the http loopback origin).
+  app.set("trust proxy", true);
+  // The x402 middleware builds the 402's resource.url from req.protocol +
+  // req.headers.host — NOT our baseUrl() helper. Behind a proxy chain that can
+  // leak the origin host (ts.net) and the http scheme. When a public base is
+  // configured, force both so every 402 advertises the public name only.
+  if (cfg.PUBLIC_BASE_URL) {
+    const pub = new URL(cfg.PUBLIC_BASE_URL);
+    app.use((req, _res, next) => {
+      req.headers.host = pub.host;
+      req.headers["x-forwarded-proto"] = pub.protocol.replace(":", "");
+      req.headers["x-forwarded-host"] = pub.host;
+      next();
+    });
+  }
   app.use(express.json({ limit: "32kb" }));
   app.use(express.static(publicDir));
   // Before the payment middleware: unpaid 402 challenges are the cheap thing
