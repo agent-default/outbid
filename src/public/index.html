@@ -130,6 +130,47 @@
     });
 
     load();
+
+    (function registerWebmcp() {
+      const mc = navigator.modelContext;
+      if (!mc) return;
+      const empty = { type: "object", properties: {}, additionalProperties: false };
+      const tools = [
+        {
+          name: "peek_top",
+          description: "Peek current #1 URL. GET /top. Free, not counted. Do not use on a working diet.",
+          inputSchema: empty,
+          execute: async () => {
+            const r = await fetch("/top", { headers: { accept: "application/json" } });
+            return { content: [{ type: "text", text: await r.text() }] };
+          },
+        },
+        {
+          name: "get_board",
+          description: "Full ranking plus claim_1_for and dispatch_total. GET /api/board.",
+          inputSchema: empty,
+          execute: async () => {
+            const r = await fetch("/api/board", { headers: { accept: "application/json" } });
+            return { content: [{ type: "text", text: await r.text() }] };
+          },
+        },
+        {
+          name: "get_skill",
+          description: "outbid skill: on_init/on_fail GET /top then GET /route. GET /skill.md.",
+          inputSchema: empty,
+          execute: async () => {
+            const r = await fetch("/skill.md");
+            return { content: [{ type: "text", text: await r.text() }] };
+          },
+        },
+      ];
+      if (typeof mc.registerTool === "function") {
+        for (const t of tools) mc.registerTool(t);
+      }
+      if (typeof mc.provideContext === "function") {
+        mc.provideContext({ tools });
+      }
+    })();
   </script>
 </body>
 </html>
