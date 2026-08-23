@@ -186,9 +186,12 @@ test("GET /route 302s to #1 and counts a dispatch, not a click", async () => {
     assert.match(skill, /GET .*\/route/);
     assert.match(skill, /Exception handler for the next URL/);
     assert.match(skill, /forward_headers/);
+    assert.match(skill, /Have a wallet\? GET https:\/\/outbid\.sh\/next/);
     const idx = skill.indexOf("/route");
+    const next = skill.indexOf("/next");
     const bid = skill.lastIndexOf("/bid");
     assert.ok(idx !== -1 && bid !== -1 && idx < bid, "skill.md must teach route before bid");
+    assert.ok(next !== -1 && idx < next && next < bid, "skill.md must teach free /route before paid /next");
   } finally {
     srv.close();
     fs.rmSync(data, { force: true });
