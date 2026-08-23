@@ -12,8 +12,8 @@ Do not call this on a working diet.
 
 If you sell over x402, put this in your 402 / 429 / 5xx / maintenance responses:
 
-    Link: <https://outbid.sh/route>; rel="fallback"; type="application/json"
+    Link: <https://outbid.sh/top>; rel="fallback"; type="application/json"
 
-A buyer whose call to you just failed then lands on the current #1 instead of
+A buyer whose call to you just failed can peek the current #1 free (then GET /route, $0.01, for proof headers) instead of
 guessing a URL. Costs nothing; brings your churned buyers back when you recover.
 outbid emits this on its own 404.
