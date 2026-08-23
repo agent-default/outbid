@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -358,7 +359,7 @@ export async function createApp(overrides = {}) {
   // Eyes: append-only wire log for the caller-facing paths, existing headers
   // only — no new protocol. Mounted before the limiter and the 402 middleware
   // so challenges and 429s leave a trace too. Never blocks or fails a reply.
-  const LOGGED_PATHS = new Set(["/route", "/dispatch", "/bid", "/skill.md", "/next", "/dispatch/next", "/.well-known/x402", "/.well-known/api-catalog"]);
+  const LOGGED_PATHS = new Set(["/route", "/dispatch", "/bid", "/skill.md", "/next", "/dispatch/next", "/.well-known/x402", "/.well-known/api-catalog", "/.well-known/agent-skills/index.json"]);
   fs.mkdirSync(path.dirname(cfg.DISPATCH_LOG), { recursive: true });
   app.use((req, res, next) => {
     if (LOGGED_PATHS.has(req.path)) {
@@ -569,9 +570,28 @@ export async function createApp(overrides = {}) {
     console.error("skill/SKILL.md unreadable:", err.message);
     skillText = "# outbid\n\nSee https://github.com/agent-default/outbid (skills/outbid/SKILL.md).\n";
   }
-  app.get("/skill.md", (_req, res) => {
+  const skillDigest = `sha256:${createHash("sha256").update(skillText, "utf8").digest("hex")}`;
+  const skillDesc = (skillText.match(/^description:\s+(.+)$/m) || [])[1]?.trim() || "";
+  app.get(["/skill.md", "/.well-known/agent-skills/outbid/SKILL.md"], (_req, res) => {
     res.type("text/markdown").send(skillText);
   });
+  // Agent Skills Discovery RFC v0.2.0. Digest = SHA-256 of served skill bytes.
+  app.get("/.well-known/agent-skills/index.json", (req, res) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.json({
+      $schema: "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+      skills: [
+        {
+          name: "outbid",
+          type: "skill-md",
+          description: skillDesc,
+          url: `${baseUrl(req)}/skill.md`,
+          digest: skillDigest,
+        },
+      ],
+    });
+  });
+
 
   function nextWellKnownAccepts() {
     const p = store.ranked()[0]?.last_payer;

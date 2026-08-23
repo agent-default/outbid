@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -376,6 +377,28 @@ test("GET /next is 403 when live 402 is off; GET /route stays unpaid", async () 
   assert.deepEqual(wellJson, well, "/.well-known/x402.json must be the same handler, not a snapshot");
   assert.ok((well.resources || []).some((r) => r.url.endsWith("/next")));
   assert.ok((well.free_resources || []).some((r) => r.url.endsWith("/route")));
+});
+
+test("agent-skills index v0.2.0 hashes served skill bytes", async () => {
+  const res = await fetch(base + "/.well-known/agent-skills/index.json");
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") || "", /json/);
+  assert.equal(res.headers.get("access-control-allow-origin"), "*");
+  const idx = await res.json();
+  assert.equal(idx.$schema, "https://schemas.agentskills.io/discovery/0.2.0/schema.json");
+  assert.equal(idx.skills?.length, 1);
+  const s = idx.skills[0];
+  assert.equal(s.name, "outbid");
+  assert.equal(s.type, "skill-md");
+  assert.match(s.description, /GET https:\/\/outbid\.sh\/route/);
+  assert.ok(s.url.endsWith("/skill.md"));
+  assert.match(s.digest, /^sha256:[0-9a-f]{64}$/);
+  const skill = await fetch(base + "/skill.md");
+  const bytes = Buffer.from(await skill.arrayBuffer());
+  assert.equal(s.digest, `sha256:${createHash("sha256").update(bytes).digest("hex")}`);
+  const alias = await fetch(base + "/.well-known/agent-skills/outbid/SKILL.md");
+  assert.equal(alias.status, 200);
+  assert.equal(await alias.text(), bytes.toString("utf8"));
 });
 
 test("ARD ai-catalog.json lists real doors only", async () => {
