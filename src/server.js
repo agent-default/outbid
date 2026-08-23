@@ -32,8 +32,9 @@ function resolveConfig(overrides = {}) {
     EVM_NETWORK: env.EVM_NETWORK || "eip155:84532",
     SVM_NETWORK: env.SVM_NETWORK || "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
     DATA_FILE,
-    ACCESS_LOG_FILE:
-      env.ACCESS_LOG_FILE || path.join(path.dirname(DATA_FILE), "dispatches.jsonl"),
+    DISPATCH_LOG:
+      env.DISPATCH_LOG ||
+      path.join(path.dirname(DATA_FILE), `${path.parse(DATA_FILE).name}.dispatches.jsonl`),
     DEAD_LETTER_FILE:
       env.DEAD_LETTER_FILE || path.join(__dirname, "..", "data", "settled-uncredited.jsonl"),
     RATE_LIMIT_MAX: Number(env.RATE_LIMIT_MAX || 30),
@@ -258,6 +259,7 @@ export async function createApp(overrides = {}) {
   // only — no new protocol. Mounted before the limiter and the 402 middleware
   // so challenges and 429s leave a trace too. Never blocks or fails a reply.
   const LOGGED_PATHS = new Set(["/route", "/dispatch", "/bid", "/skill.md"]);
+  fs.mkdirSync(path.dirname(cfg.DISPATCH_LOG), { recursive: true });
   app.use((req, res, next) => {
     if (LOGGED_PATHS.has(req.path)) {
       res.on("finish", () => {
@@ -268,14 +270,14 @@ export async function createApp(overrides = {}) {
           status: res.statusCode,
           ip:
             req.headers["cf-connecting-ip"] ||
-            req.headers["x-forwarded-for"] ||
+            String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
             req.socket?.remoteAddress ||
             null,
           ua: req.headers["user-agent"] || null,
           accept: req.headers["accept"] || null,
           listing_id: res.locals.listing_id ?? null,
         });
-        fs.appendFile(cfg.ACCESS_LOG_FILE, line + "\n", (err) => {
+        fs.appendFile(cfg.DISPATCH_LOG, line + "\n", (err) => {
           if (err) console.error("access log:", err.message);
         });
       });
