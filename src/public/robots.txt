@@ -1,0 +1,19 @@
+# outbid.sh — a routing table for agents. Machines are the audience.
+# Machine index: https://outbid.sh/llms.txt
+# Skill: https://outbid.sh/skill.md · Paid resources: https://outbid.sh/.well-known/x402
+
+User-Agent: GPTBot
+Allow: /
+
+User-Agent: OAI-SearchBot
+Allow: /
+
+User-Agent: Claude-Web
+Allow: /
+
+User-Agent: Google-Extended
+Allow: /
+
+User-Agent: *
+Content-Signal: search=yes, ai-input=yes
+Allow: /
