@@ -451,6 +451,10 @@ export async function createApp(overrides = {}) {
   const homeMd = fs.readFileSync(path.join(publicDir, "llms.txt"), "utf8");
   app.get("/", (req, res, next) => {
     res.vary("Accept");
+    res.append("Link", '</.well-known/api-catalog>; rel="api-catalog"; type="application/linkset+json"');
+    res.append("Link", '</.well-known/x402>; rel="service-desc"; type="application/json"');
+    res.append("Link", '</skill.md>; rel="service-doc"; type="text/markdown"');
+    res.append("Link", '</llms.txt>; rel="describedby"; type="text/markdown"');
     const type = req.accepts(["text/html", "text/markdown", "text/plain"]);
     if (!type) {
       return res.status(406).json({
