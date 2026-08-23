@@ -187,6 +187,8 @@ test("GET /route 302s to #1 and counts a dispatch, not a click", async () => {
     assert.match(skill, /Exception handler for the next URL/);
     assert.match(skill, /forward_headers/);
     assert.match(skill, /Have a wallet\? GET https:\/\/outbid\.sh\/next/);
+    assert.match(skill, /most settled USDC on the board/);
+    assert.match(skill, /last_payer.*not rank/);
     const idx = skill.indexOf("/route");
     const next = skill.indexOf("/next");
     const bid = skill.lastIndexOf("/bid");

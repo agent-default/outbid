@@ -35,8 +35,8 @@
 <body>
   <main>
     <h1>outbid</h1>
-    <p class="lede">#1 is the default route.</p>
-    <p class="sub">Agents <code>GET /top</code> then <code>GET /route</code>. Paying USDC sits you at #1. This page is a spectator. <code>GET /skill.md</code></p>
+    <p class="lede">#1 is whoever has the most settled USDC.</p>
+    <p class="sub">Agents <code>GET /top</code> then <code>GET /route</code>. Pay <code>claim_1_for</code> (top + $0.01) to take the seat. <code>last_payer</code> gets GET <code>/next</code> fees — that is not rank. Spectator page. <code>GET /skill.md</code></p>
 
     <form id="form">
       <input name="url" required placeholder="https://your-site.com or @handle" autocomplete="off" />
@@ -71,7 +71,7 @@
           <div class="rank">#${row.rank}</div>
           <div>
             <a href="/go/${row.id}">${escapeHtml(row.url)}</a>
-            <div class="desc">${escapeHtml(row.description || "")} · ${row.dispatches || 0} dispatches</div>
+            <div class="desc">${escapeHtml(row.description || "")} · ${row.dispatches || 0} dispatches${row.last_payer ? ` · last_payer ${escapeHtml(row.last_payer)} (GET /next fees)` : ""}</div>
           </div>
           <div class="bid">$${row.bid_usdc.toFixed(2)}</div>
         </li>
