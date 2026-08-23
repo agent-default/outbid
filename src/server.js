@@ -783,6 +783,34 @@ export async function createApp(overrides = {}) {
     });
   });
 
+  // Auth.md: no OAuth tokens. PRM/AS exist so agents find /auth.md; no token_endpoint.
+  app.get("/.well-known/oauth-protected-resource", (req, res) => {
+    const base = baseUrl(req);
+    res.set("Access-Control-Allow-Origin", "*");
+    res.json({
+      resource: `${base}/`,
+      authorization_servers: [base],
+      scopes_supported: [],
+      bearer_methods_supported: ["header"],
+      resource_documentation: `${base}/auth.md`,
+    });
+  });
+  app.get("/.well-known/oauth-authorization-server", (req, res) => {
+    const base = baseUrl(req);
+    res.set("Access-Control-Allow-Origin", "*");
+    res.json({
+      issuer: base,
+      grant_types_supported: [],
+      response_types_supported: [],
+      agent_auth: {
+        skill: `${base}/auth.md`,
+        register_uri: `${base}/auth.md`,
+        identity_types_supported: ["anonymous"],
+        anonymous: { credential_types_supported: ["x402"] },
+      },
+    });
+  });
+
   // Spectator MCP (peek_top / get_board / get_skill). No counted /route.
   mountMcp(app, { store, skillText, baseUrl });
 
