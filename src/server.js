@@ -377,14 +377,14 @@ export async function createApp(overrides = {}) {
   // Consume side. 302 Location is for dumb clients. Custom headers on a 302
   // never reach the seller — the agent has to copy them onto the follow-up
   // request. Accept: application/json returns the URL + headers to forward.
-  function sendRoute(req, res) {
+  function sendRoute(req, res, forceJson = false) {
     const hit = store.dispatchTop();
     if (!hit.ok) return res.status(404).json({ ok: false, error: hit.error });
     res.locals.listing_id = hit.listing.id;
     const dest = destinationOf(hit.listing);
     const headers = proofHeaders(hit.listing);
     for (const [k, v] of Object.entries(headers)) res.set(k, v);
-    if (wantsJson(req)) {
+    if (forceJson || wantsJson(req)) {
       return res.json({
         ok: true,
         rank: 1,
@@ -419,13 +419,15 @@ export async function createApp(overrides = {}) {
 
   app.get("/route", (req, res) => sendRoute(req, res));
   app.post("/dispatch", (req, res) => sendRoute(req, res));
+  // Paid dispatch is always JSON: a 302 after settlement would strip the
+  // proof headers the caller just bought (our own verify client hit this).
   app.get("/next", (req, res) => {
     if (!x402.live) return res.status(403).json({ ok: false, error: "live 402 disabled" });
-    return sendRoute(req, res);
+    return sendRoute(req, res, true);
   });
   app.post("/dispatch/next", (req, res) => {
     if (!x402.live) return res.status(403).json({ ok: false, error: "live 402 disabled" });
-    return sendRoute(req, res);
+    return sendRoute(req, res, true);
   });
 
   app.get("/go/:id", (req, res) => {
@@ -435,6 +437,14 @@ export async function createApp(overrides = {}) {
       ? `https://x.com/${hit.listing.url.slice(1)}`
       : hit.listing.url;
     res.redirect(302, target);
+  });
+
+  // PayAI's catalog monitor HEADs /bid; the POST-only route 404'd, which its
+  // uptime check reads as "down". HEAD asserts existence: 200, no body.
+  app.head("/bid", (_req, res) => {
+    res.set("Allow", "POST");
+    res.set("X-Outbid-Note", "POST with x402 payment - see /.well-known/x402");
+    res.status(200).end();
   });
 
   // Live path: by the time this handler runs the payment is VERIFIED but not

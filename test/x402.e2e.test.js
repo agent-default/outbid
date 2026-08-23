@@ -203,11 +203,15 @@ test("paid GET /next dispatches without raising bid_usdc", async () => {
   const before = await (await fetch(`${base}/api/board`)).json();
   const bid = before.listings[0].bid_usdc;
   const disp = before.dispatch_total;
-  const res = await paidFetch()(`${base}/next`, { headers: { accept: "application/json" } });
+  // Deliberately NO Accept header and NO redirect-following: the paid reply
+  // must be JSON regardless, never a 302 that strips the bought proof headers.
+  const res = await paidFetch()(`${base}/next`, { redirect: "manual" });
   const text = await res.text();
   assert.equal(res.status, 200, text);
+  assert.match(res.headers.get("content-type") || "", /application\/json/);
   const body = JSON.parse(text);
   assert.equal(body.ok, true);
+  assert.ok(body.forward_headers, "forward_headers missing from paid dispatch");
   const board = await (await fetch(`${base}/api/board`)).json();
   assert.equal(board.listings[0].bid_usdc, bid);
   assert.equal(board.dispatch_total, disp + 1);

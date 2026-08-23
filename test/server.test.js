@@ -313,6 +313,12 @@ test("bid endpoints rate limit per IP with Retry-After", async () => {
   }
 });
 
+test("HEAD /bid is 200 with Allow: POST for catalog health checks", async () => {
+  const res = await fetch(base + "/bid", { method: "HEAD" });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("allow"), "POST");
+});
+
 test("GET /next is 403 when live 402 is off; GET /route stays unpaid", async () => {
   const n = await json("/next");
   assert.equal(n.status, 403);
