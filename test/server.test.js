@@ -115,9 +115,9 @@ test("route hits land in the access log with wire attribution", async () => {
   assert.ok(hit, "no access-log line for the probe");
   assert.equal(hit.method, "GET");
   assert.equal(hit.path, "/route");
-  assert.equal(hit.status, 200);
+  assert.equal(hit.status, 403);
   assert.ok(hit.ip, "ip missing");
-  assert.ok(hit.listing_id, "listing_id missing");
+  assert.equal(hit.listing_id, null);
   assert.ok(hit.ts && hit.accept.includes("application/json"));
   assert.equal(hit.paid_hdr, false, "paid_hdr must be logged");
 });
@@ -170,9 +170,9 @@ test("GET /route 404s on an empty board", async () => {
   await new Promise((resolve) => srv.listen(0, "127.0.0.1", resolve));
   try {
     const res = await fetch(`http://127.0.0.1:${srv.address().port}/route`, { redirect: "manual" });
-    assert.equal(res.status, 404);
+    assert.equal(res.status, 403);
     const body = await res.json();
-    assert.match(body.error, /no #1/);
+    assert.match(body.error, /402 disabled/);
   } finally {
     srv.close();
     fs.rmSync(data, { force: true });
@@ -198,27 +198,18 @@ test("GET /route 302s to #1 and counts a dispatch, not a click", async () => {
       body: JSON.stringify({ url: "https://route.example/x402", amount: 0.05, description: "seller" }),
     });
     const res = await fetch(`${b}/route`, { redirect: "manual" });
-    assert.equal(res.status, 302);
-    assert.equal(res.headers.get("location"), "https://route.example/x402");
-    assert.equal(res.headers.get("x-outbid-rank"), "1");
-    assert.ok(res.headers.get("x-outbid-listing"));
-    assert.match(res.headers.get("x-outbid-note") || "", /you were sent here because you were #1/i);
+    assert.equal(res.status, 403);
     const board = await (await fetch(`${b}/api/board`)).json();
-    assert.equal(board.listings[0].dispatches, 1);
-    assert.equal(board.listings[0].clicks, 0);
-    assert.equal(board.dispatch_total, 1);
+    assert.equal(board.dispatch_total, 0);
     const skill = await (await fetch(`${b}/skill.md`)).text();
     assert.match(skill, /GET .*\/route/);
     assert.match(skill, /Exception handler for the next URL/);
     assert.match(skill, /forward_headers/);
-    assert.match(skill, /Have a wallet\? GET https:\/\/outbid\.sh\/next/);
+    assert.match(skill, /Unpaid is 402/);
     assert.match(skill, /highest settled bid/);
-    assert.match(skill, /Those are different jobs/);
     const idx = skill.indexOf("/route");
-    const next = skill.indexOf("/next");
     const bid = skill.lastIndexOf("/bid");
     assert.ok(idx !== -1 && bid !== -1 && idx < bid, "skill.md must teach route before bid");
-    assert.ok(next !== -1 && idx < next && next < bid, "skill.md must teach free /route before paid /next");
   } finally {
     srv.close();
     fs.rmSync(data, { force: true });
@@ -277,23 +268,18 @@ test("POST /dispatch 302s; Accept json returns URL + headers to forward", async 
       body: JSON.stringify({ url: "https://seller.example/x402", amount: 0.05 }),
     });
     const redir = await fetch(`${b}/dispatch`, { method: "POST", redirect: "manual" });
-    assert.equal(redir.status, 302);
-    assert.equal(redir.headers.get("location"), "https://seller.example/x402");
+    assert.equal(redir.status, 403);
     const json = await fetch(`${b}/route`, {
       headers: { accept: "application/json" },
     });
-    assert.equal(json.status, 200);
-    const body = await json.json();
-    assert.equal(body.url, "https://seller.example/x402");
-    assert.equal(body.forward_headers["X-Outbid-Rank"], "1");
-    assert.match(body.forward_headers["X-Outbid-Note"], /you were sent here because you were #1/i);
+    assert.equal(json.status, 403);
     const board = await (await fetch(`${b}/api/board`)).json();
-    assert.equal(board.dispatch_total, 2);
-    assert.equal(board.listings[0].clicks, 0);
+    assert.equal(board.dispatch_total, 0);
     const well = await (await fetch(`${b}/.well-known/x402`)).json();
     const free = (well.free_resources || []).map((r) => `${r.method} ${new URL(r.url).pathname}`);
     assert.ok(free.includes("GET /top"));
-    assert.ok(free.includes("POST /dispatch"));
+    assert.ok(!free.includes("POST /dispatch"));
+    assert.ok((well.resources || []).some((r) => r.url.endsWith("/route")));
     const topIdx = free.findIndex((x) => x === "GET /top");
     const bidPaid = (well.resources || []).some((r) => r.url.endsWith("/bid"));
     assert.ok(bidPaid);
@@ -358,7 +344,7 @@ test("GET /bid is 405 with Allow: POST, not 404", async () => {
 test("HEAD never counts a dispatch or leaks proof headers", async () => {
   const before = (await json("/api/meta")).body.dispatch_total;
   const r = await fetch(base + "/route", { method: "HEAD" });
-  assert.equal(r.status, 200);
+  assert.equal(r.status, 402);
   assert.equal(r.headers.get("x-outbid-rank"), null, "proof headers must not ride HEAD");
   const n = await fetch(base + "/next", { method: "HEAD" });
   assert.equal(n.status, 402);
@@ -371,12 +357,13 @@ test("GET /next is 403 when live 402 is off; GET /route stays unpaid", async () 
   const n = await json("/next");
   assert.equal(n.status, 403);
   const route = await fetch(base + "/route", { redirect: "manual" });
-  assert.equal(route.status, 302);
+  assert.equal(route.status, 403);
   const well = await (await fetch(base + "/.well-known/x402")).json();
   const wellJson = await (await fetch(base + "/.well-known/x402.json")).json();
   assert.deepEqual(wellJson, well, "/.well-known/x402.json must be the same handler, not a snapshot");
   assert.ok((well.resources || []).some((r) => r.url.endsWith("/next")));
-  assert.ok((well.free_resources || []).some((r) => r.url.endsWith("/route")));
+  assert.ok((well.resources || []).some((r) => r.url.endsWith("/route")));
+  assert.ok(!(well.free_resources || []).some((r) => r.url.endsWith("/route")));
 });
 
 test("agent-skills index v0.2.0 hashes served skill bytes", async () => {

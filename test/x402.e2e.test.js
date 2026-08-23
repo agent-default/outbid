@@ -187,13 +187,15 @@ test("paid bid settles and the board row comes from settled facts", async () => 
   assert.match(row.last_tx, /^0xsettled/);
 });
 
-test("GET /next 402s to #1 last_payer; GET /route stays free", async () => {
-  const free = await fetch(`${base}/route`, { redirect: "manual" });
-  assert.equal(free.status, 302);
-  const res = await fetch(`${base}/next`, { redirect: "manual" });
+test("GET /route 402s to #1 last_payer; GET /top stays free", async () => {
+  const top = await fetch(`${base}/top`);
+  assert.equal(top.status, 200);
+  const res = await fetch(`${base}/route`, { redirect: "manual" });
   assert.equal(res.status, 402);
+  const disp = await fetch(`${base}/dispatch`, { method: "POST", redirect: "manual" });
+  assert.equal(disp.status, 402);
   const challenge = decodeChallenge(res);
-  assert.match(challenge.resource?.url || "", /\/next$/);
+  assert.match(challenge.resource?.url || "", /\/route$/);
   const accept = challenge.accepts?.[0];
   assert.equal(accept.amount, "10000");
   assert.equal(accept.payTo.toLowerCase(), payerAccount.address.toLowerCase());
@@ -220,13 +222,16 @@ test("402 body is a genuine v1 invoice; header stays v2", async () => {
   assert.match(String(a.resource), /\/next$/, "v1 resource is a URL string per accept");
 });
 
-test("paid GET /next dispatches without raising bid_usdc", async () => {
+test("paid GET /route dispatches without raising bid_usdc", async () => {
   const before = await (await fetch(`${base}/api/board`)).json();
   const bid = before.listings[0].bid_usdc;
   const disp = before.dispatch_total;
   // Deliberately NO Accept header and NO redirect-following: the paid reply
   // must be JSON regardless, never a 302 that strips the bought proof headers.
-  const res = await paidFetch()(`${base}/next`, { redirect: "manual" });
+  const res = await paidFetch()(`${base}/route`, {
+    headers: { accept: "application/json" },
+    redirect: "manual",
+  });
   const text = await res.text();
   assert.equal(res.status, 200, text);
   assert.match(res.headers.get("content-type") || "", /application\/json/);

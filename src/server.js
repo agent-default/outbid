@@ -231,7 +231,7 @@ export async function createApp(overrides = {}) {
     const nextAccepts = [];
     const nextPrice = formatPrice(MIN_USDC);
     app.use((req, res, next) => {
-      if (req.path !== "/next" && req.path !== "/dispatch/next") return next();
+      if (!["/next", "/dispatch/next", "/route", "/dispatch"].includes(req.path)) return next();
       nextAccepts.length = 0;
       const p = store.ranked()[0]?.last_payer;
       if (!p) return res.status(404).json({ ok: false, error: "no #1 last_payer" });
@@ -250,7 +250,7 @@ export async function createApp(overrides = {}) {
     // tutorial code — see a paywall with no invoice and loop forever (the
     // funnel showed 17 IPs with paid intent stuck exactly there). Mirror the
     // decoded header into any empty 402 body, plus a hint for humans/LLMs.
-    const PAID_402_PATHS = new Set(["/bid", "/next", "/dispatch/next"]);
+    const PAID_402_PATHS = new Set(["/bid", "/next", "/dispatch/next", "/route", "/dispatch"]);
     // Dialect split, measured 10:32Z: x402-fetch@1.1.0 (the v1 tutorial client)
     // parses the 402 BODY and dies on CAIP-2 network names (zod enum wants
     // "base"/"solana"). Modern clients read the v2 PAYMENT-REQUIRED header and
@@ -296,7 +296,7 @@ export async function createApp(overrides = {}) {
                   extra: a.extra,
                 })),
                 extensions: dec.extensions,
-                hint: "Pay with an x402 client: wrapFetchWithPayment(fetch, client) from @x402/fetch (or the v1 x402-fetch npm), then retry this URL. No wallet? GET /route is free. Docs: https://outbid.sh/skill.md",
+                hint: "Pay with an x402 client: wrapFetchWithPayment(fetch, client) from @x402/fetch (or the v1 x402-fetch npm), then retry this URL. Peek free: GET /top. Docs: https://outbid.sh/skill.md",
               };
             } catch {}
           }
@@ -335,9 +335,19 @@ export async function createApp(overrides = {}) {
     app.use(
       paymentMiddleware(
         {
+          "GET /route": {
+            accepts: nextAccepts,
+            description: "Pay $0.01 USDC to current #1 last_payer for a counted dispatch.",
+            mimeType: "application/json",
+          },
+          "POST /dispatch": {
+            accepts: nextAccepts,
+            description: "Same as GET /route. Pay $0.01 to #1 last_payer.",
+            mimeType: "application/json",
+          },
           "GET /next": {
             accepts: nextAccepts,
-            description: "Pay $0.01 USDC to current #1 last_payer for a counted dispatch. GET /route stays free.",
+            description: "Pay $0.01 USDC to current #1 last_payer for a counted dispatch. Same circuit as GET /route.",
             mimeType: "application/json",
             extensions: {
               ...declareDiscoveryExtension({
@@ -355,7 +365,7 @@ export async function createApp(overrides = {}) {
           },
           "POST /dispatch/next": {
             accepts: nextAccepts,
-            description: "Same as GET /next. Pay $0.01 to #1 last_payer. POST /dispatch stays free.",
+            description: "Same as GET /next. Pay $0.01 to #1 last_payer.",
             mimeType: "application/json",
           },
           "POST /bid": {
@@ -551,13 +561,22 @@ export async function createApp(overrides = {}) {
   // aliases HEAD onto app.get, and the payment middleware matches GET only,
   // so without these routes a HEAD /next got the paid product free (VirusTotal
   // did, 09:53Z). Explicit HEAD routes win by registration order.
-  app.head("/route", (_req, res) => res.status(200).end());
+  app.head("/route", (_req, res) => {
+    res.set("X-Outbid-Note", "GET with x402 payment - see /.well-known/x402");
+    res.status(402).end();
+  });
   app.head("/next", (_req, res) => {
     res.set("X-Outbid-Note", "GET with x402 payment - see /.well-known/x402");
     res.status(402).end();
   });
-  app.get("/route", (req, res) => sendRoute(req, res));
-  app.post("/dispatch", (req, res) => sendRoute(req, res));
+  app.get("/route", (req, res) => {
+    if (!x402.live) return res.status(403).json({ ok: false, error: "live 402 disabled" });
+    return sendRoute(req, res);
+  });
+  app.post("/dispatch", (req, res) => {
+    if (!x402.live) return res.status(403).json({ ok: false, error: "live 402 disabled" });
+    return sendRoute(req, res);
+  });
   // Paid dispatch is always JSON: a 302 after settlement would strip the
   // proof headers the caller just bought (our own verify client hit this).
   app.get("/next", (req, res) => {
@@ -726,16 +745,26 @@ export async function createApp(overrides = {}) {
           accepts,
         },
         {
+          url: `${base}/route`,
+          method: "GET",
+          description: "Paid dispatch: $0.01 USDC to current #1 last_payer. Counted.",
+          accepts: nextWellKnownAccepts(),
+        },
+        {
+          url: `${base}/dispatch`,
+          method: "POST",
+          description: "Same as GET /route. $0.01 to #1 last_payer. Counted.",
+          accepts: nextWellKnownAccepts(),
+        },
+        {
           url: `${base}/next`,
           method: "GET",
-          description: "Paid dispatch: $0.01 USDC to current #1 last_payer. GET /route stays free.",
+          description: "Paid dispatch: $0.01 USDC to current #1 last_payer. Same circuit as GET /route.",
           accepts: nextWellKnownAccepts(),
         },
       ],
       free_resources: [
         { url: `${base}/top`, method: "GET", description: "Current #1 JSON. Not counted. get_top." },
-        { url: `${base}/route`, method: "GET", description: "Dispatch: 302 to #1, or JSON if Accept: application/json. Counted." },
-        { url: `${base}/dispatch`, method: "POST", description: "Same as GET /route. Counted." },
         { url: `${base}/api/board`, method: "GET", description: "Full ranking + dispatch_total." },
         { url: `${base}/skill.md`, method: "GET" },
       ],
