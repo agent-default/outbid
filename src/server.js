@@ -220,6 +220,12 @@ export async function createApp(overrides = {}) {
     if (cfg.SVM_ADDRESS) {
       paidAccepts.push({ scheme: "exact", price: priceFromContext, network: cfg.SVM_NETWORK, payTo: cfg.SVM_ADDRESS });
     }
+    // Known benign race: nextAccepts is shared and rebuilt per request because
+    // the middleware captures it by reference and the core's payTo-function
+    // path has no option-skip (a resolver failure fails the whole request), so
+    // strict matching-rail semantics need this rebuild. If #1 flips while a
+    // request is in flight, the fee settles to the payer named in the 402 the
+    // caller actually accepted — quote-time semantics, recorded by recordNext.
     const nextAccepts = [];
     const nextPrice = formatPrice(MIN_USDC);
     app.use((req, res, next) => {
@@ -310,7 +316,7 @@ export async function createApp(overrides = {}) {
   // Eyes: append-only wire log for the caller-facing paths, existing headers
   // only — no new protocol. Mounted before the limiter and the 402 middleware
   // so challenges and 429s leave a trace too. Never blocks or fails a reply.
-  const LOGGED_PATHS = new Set(["/route", "/dispatch", "/bid", "/skill.md", "/next", "/dispatch/next"]);
+  const LOGGED_PATHS = new Set(["/route", "/dispatch", "/bid", "/skill.md", "/next", "/dispatch/next", "/.well-known/x402"]);
   fs.mkdirSync(path.dirname(cfg.DISPATCH_LOG), { recursive: true });
   app.use((req, res, next) => {
     if (LOGGED_PATHS.has(req.path)) {
