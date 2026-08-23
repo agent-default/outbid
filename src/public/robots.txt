@@ -1,6 +1,7 @@
 # outbid.sh — RFC 9309. Machines are the audience.
 # Allow discovery. Disallow counted consume so crawlers do not inflate dispatch_total.
 # Machine index: https://outbid.sh/llms.txt · Skill: https://outbid.sh/skill.md
+Sitemap: https://outbid.sh/sitemap.xml
 
 User-agent: *
 Content-Signal: ai-train=no, search=yes, ai-input=yes
