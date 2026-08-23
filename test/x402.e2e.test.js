@@ -205,6 +205,21 @@ test("GET /next 402s to #1 last_payer; GET /route stays free", async () => {
   assert.match(body.hint || "", /skill\.md/);
 });
 
+test("402 body is a genuine v1 invoice; header stays v2", async () => {
+  const res = await fetch(`${base}/next`, { headers: { accept: "application/json" } });
+  assert.equal(res.status, 402);
+  const v2 = decodeChallenge(res);
+  assert.equal(v2.x402Version, 2);
+  assert.ok(v2.accepts[0].network.includes(":"), "header network must stay CAIP-2");
+  const body = await res.json();
+  assert.equal(body.x402Version, 1, "body must be the v1 dialect");
+  const a = body.accepts[0];
+  assert.equal(a.maxAmountRequired, "10000");
+  assert.equal(a.amount, undefined, "v1 accepts use maxAmountRequired, not amount");
+  assert.ok(!String(a.network).includes(":"), `v1 network must be a legacy name, got ${a.network}`);
+  assert.match(String(a.resource), /\/next$/, "v1 resource is a URL string per accept");
+});
+
 test("paid GET /next dispatches without raising bid_usdc", async () => {
   const before = await (await fetch(`${base}/api/board`)).json();
   const bid = before.listings[0].bid_usdc;
@@ -281,4 +296,40 @@ test("query amount still works for curl users", async () => {
   assert.equal(res.status, 402);
   const challenge = decodeChallenge(res);
   assert.equal(challenge.accepts?.[0]?.amount, "30000");
+});
+
+// Kept LAST: this settle consumes a mock facilitator tx, and the /bid tests
+// above assert absolute 0xsettledNNNN sequence numbers.
+test("v1 payment payload settles through the alias shim", async () => {
+  const before = (await (await fetch(`${base}/api/board`)).json()).dispatch_total;
+  // Downgrading transport: turn the modern client's v2 PAYMENT-SIGNATURE into
+  // the v1 X-PAYMENT wire shape (legacy network name, top-level scheme).
+  const downgrade = (input, init = {}) => {
+    const reqObj = input instanceof Request ? input : null;
+    const h = new Headers(reqObj ? reqObj.headers : init.headers || {});
+    const sig = h.get("payment-signature");
+    if (sig) {
+      const p = JSON.parse(Buffer.from(sig, "base64").toString());
+      const legacy = { "eip155:8453": "base", "eip155:84532": "base-sepolia" }[p.accepted.network];
+      assert.ok(legacy, `test net ${p.accepted.network} needs a legacy alias`);
+      h.delete("payment-signature");
+      h.set(
+        "x-payment",
+        Buffer.from(
+          JSON.stringify({ x402Version: 1, scheme: p.accepted.scheme, network: legacy, payload: p.payload }),
+        ).toString("base64"),
+      );
+    }
+    if (reqObj) return fetch(new Request(reqObj, { headers: h }));
+    return fetch(input, { ...init, headers: h });
+  };
+  const client = new x402Client();
+  client.register("eip155:*", new ExactEvmScheme(payerAccount));
+  const res = await wrapFetchWithPayment(downgrade, client)(`${base}/next`, {
+    headers: { accept: "application/json" },
+  });
+  const text = await res.text();
+  assert.equal(res.status, 200, `v1 payload must settle, got ${res.status}: ${text.slice(0, 300)}`);
+  const after = (await (await fetch(`${base}/api/board`)).json()).dispatch_total;
+  assert.equal(after, before + 1, "v1-paid dispatch must count");
 });

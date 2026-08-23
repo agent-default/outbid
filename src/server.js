@@ -250,6 +250,24 @@ export async function createApp(overrides = {}) {
     // funnel showed 17 IPs with paid intent stuck exactly there). Mirror the
     // decoded header into any empty 402 body, plus a hint for humans/LLMs.
     const PAID_402_PATHS = new Set(["/bid", "/next", "/dispatch/next"]);
+    // Dialect split, measured 10:32Z: x402-fetch@1.1.0 (the v1 tutorial client)
+    // parses the 402 BODY and dies on CAIP-2 network names (zod enum wants
+    // "base"/"solana"). Modern clients read the v2 PAYMENT-REQUIRED header and
+    // parse either dialect. So: header stays v2, body is a genuine v1 invoice.
+    const LEGACY_NET = {
+      "eip155:8453": "base",
+      "eip155:84532": "base-sepolia",
+      "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": "solana",
+      "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1": "solana-devnet",
+    };
+    const CAIP_NET = Object.fromEntries(Object.entries(LEGACY_NET).map(([k, v]) => [v, k]));
+    // Quote cache for the upgrade shim below: the wire accepts each caller was
+    // actually challenged with, keyed by path+IP (quote-time semantics, same
+    // trade recordNext already documents). Cold cache self-heals: the shim
+    // passes the v1 payload through, the middleware re-402s, the client
+    // re-reads the quote and retries against a warm cache.
+    const wireQuotes = new Map();
+    const quoteKey = (req) => `${req.path}|${clientIp(req) || "?"}`;
     app.use((req, res, next) => {
       if (!PAID_402_PATHS.has(req.path)) return next();
       const origJson = res.json.bind(res);
@@ -259,16 +277,57 @@ export async function createApp(overrides = {}) {
           if (hdr) {
             try {
               const dec = JSON.parse(Buffer.from(String(hdr), "base64").toString());
+              if (wireQuotes.size > 1000) wireQuotes.clear();
+              wireQuotes.set(quoteKey(req), dec.accepts || []);
               body = {
-                ...dec,
-                ...(body && Object.keys(body).length ? body : {}),
-                hint: "Pay with an x402 client: wrapFetchWithPayment(fetch, client) from @x402/fetch, then retry this URL. Docs: https://outbid.sh/skill.md",
+                x402Version: 1,
+                error: dec.error || "Payment required",
+                accepts: (dec.accepts || []).map((a) => ({
+                  scheme: a.scheme,
+                  network: LEGACY_NET[a.network] || a.network,
+                  maxAmountRequired: a.amount,
+                  resource: dec.resource?.url || `${cfg.PUBLIC_BASE_URL}${req.path}`,
+                  description: dec.resource?.description || "",
+                  mimeType: dec.resource?.mimeType || "application/json",
+                  payTo: a.payTo,
+                  maxTimeoutSeconds: a.maxTimeoutSeconds,
+                  asset: a.asset,
+                  extra: a.extra,
+                })),
+                extensions: dec.extensions,
+                hint: "Pay with an x402 client: wrapFetchWithPayment(fetch, client) from @x402/fetch (or the v1 x402-fetch npm), then retry this URL. Docs: https://outbid.sh/skill.md",
               };
             } catch {}
           }
         }
         return origJson(body);
       };
+      next();
+    });
+    // Inbound half of the dialect split. A v1 client sends X-PAYMENT with
+    // {x402Version:1, scheme, network:"base", payload} — but the facilitator
+    // only advertises v2 kinds (supportedResponsesMap is keyed by version), so
+    // a v1 payload can never verify as v1. Upgrade it to a v2 payload against
+    // the caller's own cached quote. The EIP-3009 signature binds chainId, not
+    // these labels; re-wrapping the envelope is safe.
+    app.use((req, _res, next) => {
+      if (!PAID_402_PATHS.has(req.path)) return next();
+      const raw = req.headers["payment-signature"] || req.headers["x-payment"];
+      if (!raw) return next();
+      try {
+        const p = JSON.parse(Buffer.from(String(raw), "base64").toString());
+        if (p && p.x402Version === 1 && CAIP_NET[p.network]) {
+          const caip = CAIP_NET[p.network];
+          const match = (wireQuotes.get(quoteKey(req)) || []).find(
+            (a) => a.scheme === p.scheme && a.network === caip,
+          );
+          const out = match
+            ? { x402Version: 2, accepted: match, payload: p.payload }
+            : { ...p, network: caip };
+          req.headers["payment-signature"] = Buffer.from(JSON.stringify(out)).toString("base64");
+          delete req.headers["x-payment"];
+        }
+      } catch {} // malformed header: let the middleware reject it, not us
       next();
     });
 
@@ -388,6 +447,23 @@ export async function createApp(overrides = {}) {
     next();
   });
   app.use(express.json({ limit: "32kb" }));
+  const homeMd = fs.readFileSync(path.join(publicDir, "llms.txt"), "utf8");
+  app.get("/", (req, res, next) => {
+    res.vary("Accept");
+    const type = req.accepts(["text/html", "text/markdown", "text/plain"]);
+    if (!type) {
+      return res.status(406).json({
+        ok: false,
+        error: "not acceptable",
+        code: "not_acceptable",
+        hint: "Accept text/html or text/markdown",
+      });
+    }
+    if (type !== "text/html") {
+      return res.type("text/markdown; charset=utf-8").send(homeMd);
+    }
+    next();
+  });
   app.use(express.static(publicDir));
   // Before the payment middleware: unpaid 402 challenges are the cheap thing
   // to spam, so they get limited too.
@@ -592,7 +668,6 @@ export async function createApp(overrides = {}) {
     });
   });
 
-
   function nextWellKnownAccepts() {
     const p = store.ranked()[0]?.last_payer;
     if (!p) return [];
@@ -708,6 +783,20 @@ export async function createApp(overrides = {}) {
   });
 
   app._outbid = { store, cfg, live: x402.live };
+  app.use((req, res) => {
+    res.vary("Accept");
+    if (req.accepts(["application/json", "text/markdown"]) === "application/json") {
+      return res.status(404).json({
+        ok: false,
+        error: "not found",
+        code: "not_found",
+        hint: "GET /llms.txt, /skill.md, /openapi.json, or /top",
+      });
+    }
+    res.status(404).type("text/markdown; charset=utf-8").send(
+      "# 404\n\nNo such path.\n\n- GET /llms.txt\n- GET /skill.md\n- GET /openapi.json\n- GET /top\n",
+    );
+  });
   return app;
 }
 
