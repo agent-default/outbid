@@ -312,3 +312,85 @@ test("bid endpoints rate limit per IP with Retry-After", async () => {
     fs.rmSync(limitedFile, { force: true });
   }
 });
+
+async function waitLog(file, pred, ms = 1000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    try {
+      const rows = fs.readFileSync(file, "utf8").trim().split("\n").map(JSON.parse);
+      const hit = rows.find(pred);
+      if (hit) return hit;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return null;
+}
+
+test("jsonl prefers x-vercel-forwarded-for over edge XFF", async () => {
+  const data = path.join(os.tmpdir(), `outbid-vercel-ip-${process.pid}.json`);
+  const logFile = path.join(os.tmpdir(), `outbid-vercel-ip-${process.pid}.jsonl`);
+  const { createApp } = await import("../src/server.js");
+  const app = await createApp({
+    X402_DRY: "1",
+    EVM_ADDRESS: "",
+    SVM_ADDRESS: "",
+    DATA_FILE: data,
+    DISPATCH_LOG: logFile,
+  });
+  const srv = http.createServer(app);
+  await new Promise((resolve) => srv.listen(0, "127.0.0.1", resolve));
+  const b = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    await fetch(`${b}/skill.md`, {
+      headers: {
+        "x-vercel-forwarded-for": "203.0.113.50, 18.222.77.226",
+        "x-forwarded-for": "18.222.77.226",
+      },
+    });
+    const vercel = await waitLog(logFile, (l) => l.ip === "203.0.113.50");
+    assert.ok(vercel, "expected Vercel client hop in jsonl");
+    await fetch(`${b}/skill.md`, {
+      headers: { "x-forwarded-for": "198.51.100.10", "cf-connecting-ip": "192.0.2.9" },
+    });
+    const cf = await waitLog(logFile, (l) => l.ip === "192.0.2.9");
+    assert.ok(cf, "expected cf-connecting-ip when Vercel header absent");
+  } finally {
+    srv.close();
+    fs.rmSync(data, { force: true });
+    fs.rmSync(logFile, { force: true });
+  }
+});
+
+test("bid limiter keys on vercel client hop not edge XFF", async () => {
+  const data = path.join(os.tmpdir(), `outbid-vercel-rl-${process.pid}.json`);
+  const { createApp } = await import("../src/server.js");
+  const app = await createApp({
+    X402_DRY: "1",
+    EVM_ADDRESS: "",
+    SVM_ADDRESS: "",
+    DATA_FILE: data,
+    RATE_LIMIT_MAX: "1",
+    RATE_LIMIT_WINDOW_MS: "60000",
+  });
+  const srv = http.createServer(app);
+  await new Promise((resolve) => srv.listen(0, "127.0.0.1", resolve));
+  const b = `http://127.0.0.1:${srv.address().port}`;
+  const post = (vercel) =>
+    fetch(`${b}/bid/dry`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-vercel-forwarded-for": vercel,
+        "x-forwarded-for": "18.222.77.226",
+      },
+      body: JSON.stringify({ url: "https://rl.example", amount: 0.01 }),
+    });
+  try {
+    assert.equal((await post("203.0.113.1")).status, 200);
+    assert.equal((await post("203.0.113.2")).status, 200);
+    assert.equal((await post("203.0.113.1")).status, 429);
+  } finally {
+    srv.close();
+    fs.rmSync(data, { force: true });
+  }
+});

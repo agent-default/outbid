@@ -43,18 +43,27 @@ function resolveConfig(overrides = {}) {
   };
 }
 
-// Sliding-window per-IP limiter for bid endpoints. Behind the Cloudflare
-// tunnel the real client is CF-Connecting-IP; fall back to the first
-// X-Forwarded-For hop, then the socket.
+function firstHop(value) {
+  return String(value || "").split(",")[0].trim();
+}
+
+// Vercel Funnel: x-vercel-forwarded-for is the client; XFF/socket is often the edge.
+function clientIp(req) {
+  return (
+    firstHop(req.get("x-vercel-forwarded-for")) ||
+    firstHop(req.get("cf-connecting-ip")) ||
+    firstHop(req.get("x-forwarded-for")) ||
+    req.socket?.remoteAddress ||
+    null
+  );
+}
+
+// Sliding-window per-IP limiter for bid endpoints.
 function makeBidLimiter({ max, windowMs }) {
   const hits = new Map(); // ip -> [timestamps]
   return (req, res, next) => {
     if (req.method !== "POST" || !req.path.startsWith("/bid")) return next();
-    const ip =
-      req.get("cf-connecting-ip") ||
-      (req.get("x-forwarded-for") || "").split(",")[0].trim() ||
-      req.socket.remoteAddress ||
-      "?";
+    const ip = clientIp(req) || "?";
     const now = Date.now();
     const recent = (hits.get(ip) || []).filter((t) => now - t < windowMs);
     if (recent.length >= max) {
@@ -268,11 +277,7 @@ export async function createApp(overrides = {}) {
           method: req.method,
           path: req.path,
           status: res.statusCode,
-          ip:
-            req.headers["cf-connecting-ip"] ||
-            String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
-            req.socket?.remoteAddress ||
-            null,
+          ip: clientIp(req),
           ua: req.headers["user-agent"] || null,
           accept: req.headers["accept"] || null,
           listing_id: res.locals.listing_id ?? null,
