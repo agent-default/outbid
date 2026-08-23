@@ -371,7 +371,12 @@ export async function createApp(overrides = {}) {
           ip: clientIp(req),
           ua: req.headers["user-agent"] || null,
           accept: req.headers["accept"] || null,
-          paid_hdr: Boolean(req.headers["payment-signature"] || req.headers["x-payment"]),
+          // Any credential on a paywall path is an attempted payment: x402 v2
+          // (payment-signature), v1 (x-payment), or MPP/credit-key styles that
+          // ride the Authorization header.
+          paid_hdr: Boolean(
+            req.headers["payment-signature"] || req.headers["x-payment"] || req.headers["authorization"],
+          ),
           listing_id: res.locals.listing_id ?? null,
         });
         fs.appendFile(cfg.DISPATCH_LOG, line + "\n", (err) => {
