@@ -242,6 +242,35 @@ export async function createApp(overrides = {}) {
       next();
     });
 
+    // v1-dialect mirror. The middleware's challenge path hardcodes an empty
+    // 402 body ({}) and carries requirements only in the PAYMENT-REQUIRED
+    // header (x402 v2). Body-reading clients — the original x402 npm, most
+    // tutorial code — see a paywall with no invoice and loop forever (the
+    // funnel showed 17 IPs with paid intent stuck exactly there). Mirror the
+    // decoded header into any empty 402 body, plus a hint for humans/LLMs.
+    const PAID_402_PATHS = new Set(["/bid", "/next", "/dispatch/next"]);
+    app.use((req, res, next) => {
+      if (!PAID_402_PATHS.has(req.path)) return next();
+      const origJson = res.json.bind(res);
+      res.json = (body) => {
+        if (res.statusCode === 402 && (!body || !body.accepts)) {
+          const hdr = res.get("PAYMENT-REQUIRED");
+          if (hdr) {
+            try {
+              const dec = JSON.parse(Buffer.from(String(hdr), "base64").toString());
+              body = {
+                ...dec,
+                ...(body && Object.keys(body).length ? body : {}),
+                hint: "Pay with an x402 client: wrapFetchWithPayment(fetch, client) from @x402/fetch, then retry this URL. Docs: https://outbid.sh/skill.md",
+              };
+            } catch {}
+          }
+        }
+        return origJson(body);
+      };
+      next();
+    });
+
     app.use(
       paymentMiddleware(
         {
@@ -342,6 +371,7 @@ export async function createApp(overrides = {}) {
           ip: clientIp(req),
           ua: req.headers["user-agent"] || null,
           accept: req.headers["accept"] || null,
+          paid_hdr: Boolean(req.headers["payment-signature"] || req.headers["x-payment"]),
           listing_id: res.locals.listing_id ?? null,
         });
         fs.appendFile(cfg.DISPATCH_LOG, line + "\n", (err) => {

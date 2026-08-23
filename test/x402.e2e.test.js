@@ -197,6 +197,12 @@ test("GET /next 402s to #1 last_payer; GET /route stays free", async () => {
   const accept = challenge.accepts?.[0];
   assert.equal(accept.amount, "10000");
   assert.equal(accept.payTo.toLowerCase(), payerAccount.address.toLowerCase());
+  // v1-dialect mirror: the same requirements must ride the 402 BODY too —
+  // body-reading clients saw {} and looped forever before this.
+  const body = await res.json();
+  assert.ok(Array.isArray(body.accepts) && body.accepts.length, "402 body must carry accepts");
+  assert.equal(body.accepts[0].payTo.toLowerCase(), payerAccount.address.toLowerCase());
+  assert.match(body.hint || "", /skill\.md/);
 });
 
 test("paid GET /next dispatches without raising bid_usdc", async () => {

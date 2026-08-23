@@ -95,6 +95,7 @@ test("route hits land in the access log with wire attribution", async () => {
   assert.ok(hit.ip, "ip missing");
   assert.ok(hit.listing_id, "listing_id missing");
   assert.ok(hit.ts && hit.accept.includes("application/json"));
+  assert.equal(hit.paid_hdr, false, "paid_hdr must be logged");
 });
 
 test("a configured wallet disables dry even if X402_DRY=1", async () => {
