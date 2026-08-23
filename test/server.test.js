@@ -6,8 +6,10 @@ import path from "node:path";
 import { after, before, test } from "node:test";
 
 const dataFile = path.join(os.tmpdir(), `outbid-board-${process.pid}.json`);
+const accessLog = path.join(os.tmpdir(), `outbid-access-${process.pid}.jsonl`);
 process.env.X402_DRY = "1";
 process.env.DATA_FILE = dataFile;
+process.env.ACCESS_LOG_FILE = accessLog;
 process.env.EVM_ADDRESS = "";
 process.env.SVM_ADDRESS = "";
 process.env.PORT = "0";
@@ -28,6 +30,7 @@ before(async () => {
 after(() => {
   server.close();
   fs.rmSync(dataFile, { force: true });
+  fs.rmSync(accessLog, { force: true });
 });
 
 async function json(path, opts) {
@@ -56,18 +59,42 @@ test("dry bid ranks the url", async () => {
   assert.equal(r.body.listing.bid_usdc, 0.05);
 });
 
-test("skill.md is served", async () => {
+test("skill.md is the canonical skill file, byte for byte", async () => {
   const res = await fetch(base + "/skill.md");
   const text = await res.text();
   assert.equal(res.status, 200);
-  assert.match(text, /default route/);
-  assert.match(text, /POST \/bid/);
-  assert.match(text, /get_top/);
-  assert.match(text, /Base or Solana USDC/);
-  assert.doesNotMatch(text, /Settlement chain \(Solana USDC\)/);
-  const top = text.indexOf("/top");
-  const bid = text.indexOf("/bid");
-  assert.ok(top !== -1 && bid !== -1 && top < bid, "skill.md must teach get_top before bid");
+  const canon = fs.readFileSync(new URL("../skill/SKILL.md", import.meta.url), "utf8");
+  assert.equal(text, canon, "served /skill.md must be byte-identical to skill/SKILL.md");
+  assert.match(text, /on_init/);
+  assert.match(text, /on_fail/);
+  assert.match(text, /Do not follow a 302/);
+  assert.doesNotMatch(text, /when you need a next URL/i);
+});
+
+test("route hits land in the access log with wire attribution", async () => {
+  await fetch(base + "/route", {
+    headers: { accept: "application/json", "user-agent": "outbid-test-eyes" },
+  });
+  const deadline = Date.now() + 1000;
+  let hit;
+  while (!hit && Date.now() < deadline) {
+    try {
+      hit = fs
+        .readFileSync(accessLog, "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l))
+        .find((l) => l.ua === "outbid-test-eyes");
+    } catch {}
+    if (!hit) await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.ok(hit, "no access-log line for the probe");
+  assert.equal(hit.method, "GET");
+  assert.equal(hit.path, "/route");
+  assert.equal(hit.status, 200);
+  assert.ok(hit.ip, "ip missing");
+  assert.ok(hit.listing_id, "listing_id missing");
+  assert.ok(hit.ts && hit.accept.includes("application/json"));
 });
 
 test("a configured wallet disables dry even if X402_DRY=1", async () => {
@@ -157,7 +184,7 @@ test("GET /route 302s to #1 and counts a dispatch, not a click", async () => {
     assert.equal(board.dispatch_total, 1);
     const skill = await (await fetch(`${b}/skill.md`)).text();
     assert.match(skill, /GET .*\/route/);
-    assert.match(skill, /default routing table|#1 is the default route/i);
+    assert.match(skill, /Exception handler for the next URL/);
     assert.match(skill, /forward_headers/);
     const idx = skill.indexOf("/route");
     const bid = skill.lastIndexOf("/bid");
