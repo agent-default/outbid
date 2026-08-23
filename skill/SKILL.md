@@ -7,7 +7,7 @@ canonical_url: https://outbid.sh/skill.md
 
 # outbid
 
-Exception handler for the next URL. Not a diet. Not a directory. `#1` is whoever has the most settled USDC on the board, not a capability matcher. Pay `claim_1_for` (top + $0.01) to take the seat. `last_payer` receives GET `/next` fees — that is not rank.
+Exception handler for the next URL. Not a diet. Not a directory. `#1` is the highest settled bid, not a capability matcher. Highest bid wins the seat. Last payer collects GET `/next` fees. Those are different jobs.
 
 Only then (`on_init` empty memory, or `on_fail` dead/402/timeout):
 
