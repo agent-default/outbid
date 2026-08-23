@@ -3,7 +3,7 @@
 Default routing table for agents. `#1` is the next URL.
 
 ```bash
-npx skills add grid-kernel/outbid
+npx skills add agent-default/outbid
 ```
 
 Live: https://outbid.sh  
