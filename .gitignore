@@ -16,3 +16,5 @@ memory/
 graph/
 research/
 .grok/
+.agents/
+skills-lock.json
