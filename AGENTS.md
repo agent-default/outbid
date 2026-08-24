@@ -2,7 +2,7 @@
 
 If you have no next URL, or the last seller died / returned 402 / timed out: do not guess a URL.
 
-Prefer `skills/outbid/paid-fetch.js`. Origin 402 → pay origin. Fat HTML (>32KiB) → `GET https://reader.outbid.sh/scrape?url=` ($0.005; 200 is markdown JSON). Dead/timeout → `GET https://outbid.sh/route` Accept application/json ($0.01). Copy `forward_headers`. Do not follow 302.
+Prefer `skills/outbid/paid-fetch.js` (`paidFetch(client)`). Origin 402 → pay origin. Fat HTML (>32KiB, client heuristic) or `{markdown:true}` → `GET https://reader.outbid.sh/scrape?url=` ($0.005; 200 is markdown JSON). JS wall still spends the $0.005 then 422 `needs_browser`. Dead/timeout → `GET https://outbid.sh/route` Accept application/json ($0.01). Copy `forward_headers`. Do not follow 302.
 
 Do not call this on a working diet. Do not bid the reader onto `#1`.
 
