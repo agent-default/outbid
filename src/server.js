@@ -233,12 +233,19 @@ export async function createApp(overrides = {}) {
     app.use((req, res, next) => {
       if (!["/next", "/dispatch/next", "/route", "/dispatch"].includes(req.path)) return next();
       nextAccepts.length = 0;
-      const p = store.ranked()[0]?.last_payer;
-      if (!p) return res.status(404).json({ ok: false, error: "no #1 last_payer" });
-      if (/^0x[a-fA-F0-9]{40}$/.test(p) && cfg.EVM_ADDRESS) {
-        nextAccepts.push({ scheme: "exact", price: nextPrice, network: cfg.EVM_NETWORK, payTo: p });
-      } else if (!p.startsWith("0x") && cfg.SVM_ADDRESS) {
-        nextAccepts.push({ scheme: "exact", price: nextPrice, network: cfg.SVM_NETWORK, payTo: p });
+      const top = store.ranked()[0];
+      if (!top) return res.status(404).json({ ok: false, error: "no #1 last_payer" });
+      // Offer every rail this seat has been claimed on, each paying that rail's
+      // own payer. A seat bid on both Base and Solana is payable on both, so a
+      // caller pays whichever rail its wallet holds. Fall back to last_payer
+      // for seats seeded before per-rail tracking.
+      const evm = top.last_payer_evm || (/^0x[a-fA-F0-9]{40}$/.test(top.last_payer || "") ? top.last_payer : null);
+      const svm = top.last_payer_svm || (top.last_payer && !top.last_payer.startsWith("0x") ? top.last_payer : null);
+      if (evm && cfg.EVM_ADDRESS) {
+        nextAccepts.push({ scheme: "exact", price: nextPrice, network: cfg.EVM_NETWORK, payTo: evm });
+      }
+      if (svm && cfg.SVM_ADDRESS) {
+        nextAccepts.push({ scheme: "exact", price: nextPrice, network: cfg.SVM_NETWORK, payTo: svm });
       }
       if (!nextAccepts.length) return res.status(404).json({ ok: false, error: "no #1 last_payer" });
       next();

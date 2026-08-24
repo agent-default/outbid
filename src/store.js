@@ -184,6 +184,14 @@ export function createStore(filePath) {
     const id = listingId(target.key);
     const now = new Date().toISOString();
     const prev = state.listings[id];
+    // Per-rail payer: a seat claimed on Base keeps its EVM payer even after a
+    // Solana bid, and vice versa, so /route can offer BOTH rails at once. The
+    // rail is the payer's format: 0x... = EVM, base58 = SVM.
+    const isEvm = typeof payer === "string" && payer.startsWith("0x");
+    const railPayers = {
+      last_payer_evm: isEvm ? payer : (prev?.last_payer_evm ?? null),
+      last_payer_svm: !isEvm && payer ? payer : (prev?.last_payer_svm ?? null),
+    };
     const next = prev
       ? {
           ...prev,
@@ -192,6 +200,7 @@ export function createStore(filePath) {
           bid_usdc: Number((prev.bid_usdc + dollars).toFixed(2)),
           updated_at: now,
           last_payer: payer,
+          ...railPayers,
           last_tx: tx,
         }
       : {
@@ -204,6 +213,7 @@ export function createStore(filePath) {
           created_at: now,
           updated_at: now,
           last_payer: payer,
+          ...railPayers,
           last_tx: tx,
         };
     state.listings[id] = next;

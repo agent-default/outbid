@@ -57,6 +57,20 @@ test("credit is idempotent on network:tx", () => {
   fs.rmSync(file);
 });
 
+test("per-rail payer: cross-rail bids keep both payers on the seat", () => {
+  const file = path.join(os.tmpdir(), `outbid-rail-${process.pid}-${Date.now()}.json`);
+  const store = createStore(file);
+  const url = "https://rpc.example";
+  store.credit({ url, atomic: "70000", payer: "0xBASE", tx: "0xa", network: "eip155:8453" });
+  // Solana bid on the SAME url must NOT erase the Base payer.
+  store.credit({ url, atomic: "10000", payer: "5oLaNaPayer", tx: "sigb", network: "solana:x" });
+  const top = store.ranked()[0];
+  assert.equal(top.last_payer_evm, "0xBASE", "EVM payer survives the SVM bid");
+  assert.equal(top.last_payer_svm, "5oLaNaPayer", "SVM payer recorded");
+  assert.equal(top.last_payer, "5oLaNaPayer", "last_payer is most-recent for display");
+  fs.rmSync(file);
+});
+
 test("credit refuses a missing tx", () => {
   const file = path.join(os.tmpdir(), `outbid-notx-${process.pid}-${Date.now()}.json`);
   const store = createStore(file);
