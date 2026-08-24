@@ -35,6 +35,19 @@ refused it — the gate does not exempt its own operator. The two settles ran
 only under a visible, bounded override (`washMaxUsdc: 0.01`), and every one
 of those decisions carries `washFlagged: true` in the receipt.
 
+## Timestamp caveat (added 2026-08-24 20:22Z)
+
+The wash flag above is decision-time truth, not a live claim. At
+10:14:53–56Z the live TWZRD card for `F1AbWu…` returned
+`wash_flagged: true`, and every receipt line records exactly that. The same
+endpoint re-checked ~10 hours later returns `wash_flagged: null` — TWZRD's
+tri-state for "nothing was evaluated here," which is not "clean." A reader
+re-running the card lookup today will not reproduce the flag. The
+`receipts.jsonl` lines and their signed decision tokens are the durable
+record of what the card said when the fuse decided — which is the reason
+receipts are published at all, instead of pointing at a live surface that
+moves.
+
 ## Verify it yourself
 
 - Settles: `getTransaction` on either signature against any Solana mainnet
