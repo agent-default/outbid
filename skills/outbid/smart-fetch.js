@@ -24,11 +24,6 @@ function trip(h, cls, ms) {
   b.until = Date.now() + (ms ?? Math.min(8000, 250 * 2 ** Math.min(b.n - 1, 5))) + Math.floor(Math.random() * 250);
   circuits.set(h, b);
 }
-function retryAfterMs(r) {
-  const v = r.headers.get("retry-after"); if (!v) return;
-  const n = Number(v); if (Number.isFinite(n)) return Math.min(60_000, Math.max(0, n * 1000));
-  const t = Date.parse(v); if (!Number.isNaN(t)) return Math.min(60_000, Math.max(0, t - Date.now()));
-}
 function mixHeaders(rest, forward, allow) {
   const out = new Headers(rest || undefined);
   for (const k of [...out.keys()]) if (STRIP.test(k)) out.delete(k);
@@ -40,7 +35,7 @@ function mixHeaders(rest, forward, allow) {
   return out;
 }
 export async function smartFetch(url, options = {}, wallet) {
-  const { markdown: wantMd = false, reader, paid, fallbackOnRateLimit = false, headerAllowlist, ...rest } = options;
+  const { markdown: wantMd = false, reader, paid, fallbackOnRateLimit: _rl, headerAllowlist, ...rest } = options;
   const base = reader || process.env.X402_READER_URL || "https://reader.outbid.sh/scrape";
   const originHost = hostOf(url);
   const cool = circuits.get(originHost);
@@ -69,16 +64,7 @@ export async function smartFetch(url, options = {}, wallet) {
   }
   if (payAttempted && r.ok) bump("origin_402_paid");
   if (r.ok) circuits.delete(originHost);
-  if (r.status === 401 || r.status === 403) return r;
-  if (r.status === 429) {
-    bump("origin_rate_limited"); trip(originHost, "rate", retryAfterMs(r));
-    if (!fallbackOnRateLimit) return r;
-    cancel(r); return routeOnce(x, rest, headerAllowlist);
-  }
-  if (r.status === 404 || r.status === 408 || r.status >= 500) {
-    bump("origin_failure"); trip(originHost, "origin_fail", retryAfterMs(r));
-    cancel(r); return routeOnce(x, rest, headerAllowlist);
-  }
+  if (r.status === 429) bump("origin_rate_limited");
   const ct = r.headers.get("content-type") || "";
   if (r.ok && ct.includes("text/html")) {
     try {
