@@ -2,7 +2,8 @@
 // Fat HTML (> FAT_HTML_BYTES, client heuristic) or init.markdown →
 //   GET https://reader.outbid.sh/scrape?url= ($0.005).
 // Reader 200 is JSON {ok,title,content,markdown,word_count}, not origin HTML.
-// JS wall: 422 {reason:"needs_browser"} after the $0.005 is spent — return it.
+// JS wall still spends $0.005; return 422 only if wantMd, else keep origin HTML.
+// Reader/size throw: keep origin. Do not fall into /route.
 // Dead/timeout → paid GET https://outbid.sh/route Accept application/json
 //   → {url, forward_headers}. Copy headers. Do not follow 302.
 export const FAT_HTML_BYTES = 32 * 1024;
@@ -16,12 +17,15 @@ export function paidFetch(client, reader, paid) {
       const r = await x(url, rest);
       const ct = r.headers.get("content-type") || "";
       if (r.ok && ct.includes("text/html")) {
-        const n = Number(r.headers.get("content-length"));
-        const bytes = n > 0 ? n : (await r.clone().arrayBuffer()).byteLength;
-        if (wantMd || bytes > FAT_HTML_BYTES) {
-          const s = await x(`${base}?url=${encodeURIComponent(String(url))}`);
-          if (s.ok || s.status === 422) return s;
-        }
+        try {
+          const n = Number(r.headers.get("content-length"));
+          const bytes = n > 0 ? n : (await r.clone().arrayBuffer()).byteLength;
+          if (wantMd || bytes > FAT_HTML_BYTES) {
+            const s = await x(`${base}?url=${encodeURIComponent(String(url))}`);
+            if (s.ok) return s;
+            if (s.status === 422 && wantMd) return s;
+          }
+        } catch { /* reader/size hop failed; origin is alive */ }
       }
       return r;
     } catch {
