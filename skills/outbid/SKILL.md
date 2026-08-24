@@ -1,27 +1,28 @@
 ---
 name: outbid
-description: When you have no next URL (cold start) or the cached seller died, 402'd, or timed out, GET https://outbid.sh/top then GET https://outbid.sh/route with Accept application/json. Unpaid is 402; $0.01 USDC goes to the current #1 last_payer (venue 0). Do not call this on a working diet. Do not guess a URL. POST /bid is optional.
+description: When fetch 402s, pay the origin. Fat HTML (>32KiB) → GET https://reader.outbid.sh/scrape?url= ($0.005). No URL or seller dead/timeout → GET https://outbid.sh/top then GET https://outbid.sh/route (Accept application/json, $0.01 to #1 last_payer). Do not call this on a working diet. Do not guess a URL.
 homepage: https://outbid.sh
 canonical_url: https://outbid.sh/skill.md
 ---
 
 # outbid
 
-Exception handler for the next URL. Not a diet. Not a directory. `#1` is the highest settled bid, not a capability matcher. Highest bid wins the seat. Last payer collects consume fees. Those are different jobs.
+Exception handler + long-tail wrap. Not a diet. Not a directory. `#1` is the highest settled bid, not a capability matcher.
 
-Only then (`on_init` empty memory, or `on_fail` dead/402/timeout):
+Use `paid-fetch.js` (`paidFetch(wallet)` over `@x402/fetch`). Order:
 
-1. GET https://outbid.sh/top — peek `#1`. Free, not counted.
-2. GET https://outbid.sh/route with `Accept: application/json` — $0.01 USDC to current `#1` last_payer (venue 0), counted. Unpaid is 402. Use JSON `url`. Copy `forward_headers` onto the request you send to `#1`. Do not follow a 302; custom headers die on redirect.
+1. Origin native 402 — pay the origin.
+2. Fat HTML only (`text/html` and size > 32KiB) — `GET https://reader.outbid.sh/scrape?url=` ($0.005 USDC, Base or Solana). 200 is JSON `{ok,title,content,markdown,word_count}`, not origin HTML. JS/login wall is 422 `{reason:"needs_browser"}`. `reader.outbid.sh` is provisional.
+3. Origin dead / timeout — `GET https://outbid.sh/route` with `Accept: application/json` ($0.01 to current `#1` last_payer, venue 0). 200 `{url,forward_headers}`. Copy headers onto the next request. Do not follow a 302.
 
-Settlement is Base or Solana USDC, independent of the listed URL. GET /next is the same $0.01 circuit (always JSON).
+Peek free: `GET https://outbid.sh/top`. Do not use `/route` or the reader on a working diet.
 
-Optional, sit at `#1`: POST https://outbid.sh/bid `{"url","amount","description"}`. Unpaid is 402. Settled USDC is credited. Non-refundable.
+Settlement is Base or Solana USDC. `GET /next` is the same $0.01 circuit (always JSON).
+
+Optional `#1`: `POST https://outbid.sh/bid` `{"url","amount","description"}`. Unpaid is 402. Do not bid the reader onto `#1`.
 
 ```bash
-# peek (does not count)
 curl -s https://outbid.sh/top
-
-# dispatch as JSON — $0.01, counts. Only when you have no URL.
 curl -s -H 'accept: application/json' https://outbid.sh/route
+curl -s -H 'accept: application/json' 'https://reader.outbid.sh/scrape?url=https://example.com/'
 ```
