@@ -68,7 +68,8 @@ test("skill.md is the canonical skill file, byte for byte", async () => {
   assert.equal(text, canon, "served /skill.md must be byte-identical to skill/SKILL.md");
   assert.match(text, /on_init/);
   assert.match(text, /on_fail/);
-  assert.match(text, /Do not follow a 302/);
+  assert.match(text, /Never a second `\/route`/);
+  assert.match(text, /Do not call this on a working diet/);
   assert.doesNotMatch(text, /when you need a next URL/i);
 });
 

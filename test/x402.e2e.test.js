@@ -238,6 +238,13 @@ test("paid GET /route dispatches without raising bid_usdc", async () => {
   const board = await (await fetch(`${base}/api/board`)).json();
   assert.equal(board.listings[0].bid_usdc, bid);
   assert.equal(board.dispatch_total, disp + 1);
+  // The settle itself must be durably recorded — payer/tx were invisible for
+  // paid /route ticks until onAfterSettle covered these paths.
+  const state = JSON.parse(fs.readFileSync(dataFile, "utf8"));
+  const tick = Object.values(state.payments).find((p) => p.tx === "0xsettled0002");
+  assert.ok(tick, "paid /route settle missing from payments ledger");
+  assert.equal(tick.kind, "next");
+  assert.equal(tick.usdc, 0.01);
 });
 
 test("paying the same URL again adds the settled amount", async () => {

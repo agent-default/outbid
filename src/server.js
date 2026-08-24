@@ -158,7 +158,7 @@ export async function createApp(overrides = {}) {
     resourceServer.onAfterSettle(async (context) => {
       const request = context.transportContext?.request;
       const path = request?.path;
-      if (path === "/next" || path === "/dispatch/next") {
+      if (["/next", "/dispatch/next", "/route", "/dispatch"].includes(path)) {
         if (context.result?.success === false) return;
         const rec = {
           tx: context.result?.transaction,
@@ -169,7 +169,7 @@ export async function createApp(overrides = {}) {
         try {
           const noted = store.recordNext(rec);
           if (!noted.ok) deadLetter({ ...rec, path, error: noted.error });
-          else if (!noted.replay) console.log("next settled", rec.tx, rec.payer);
+          else if (!noted.replay) console.log("tick settled", path, rec.tx, rec.payer);
         } catch (err) {
           deadLetter({ ...rec, path, error: String(err) });
         }
