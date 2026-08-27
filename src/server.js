@@ -375,6 +375,23 @@ export async function createApp(overrides = {}) {
             description: "Same as GET /next. Pay $0.01 to #1 last_payer.",
             mimeType: "application/json",
           },
+          // /bid is the only endpoint PayAI lists, so most arrivals GET it by
+          // default. Before 2026-08-27 that returned 405: not a payment
+          // challenge, and no x402 client re-issues as POST — it has no branch
+          // for "wrong method". 138 hits, and 10 of the 15 third-party
+          // indexers that saw it never came back; AgentEconomyReport went
+          // "not yet rated" -> "rating D" on nothing but 405s. Paywalling GET
+          // makes the listed door answer with an invoice. A *paid* GET still
+          // falls through to the 405 handler below, whose 4xx cancels
+          // settlement before any money moves. No discovery extension here:
+          // the bid body only travels on POST, so GET must not be advertised
+          // as callable.
+          "GET /bid": {
+            accepts: paidAccepts,
+            description:
+              "Bidding is POST /bid with a JSON body. This challenge exists so the paywall is visible to GET; pay and POST.",
+            mimeType: "application/json",
+          },
           "POST /bid": {
             accepts: paidAccepts,
             description:
@@ -611,11 +628,16 @@ export async function createApp(overrides = {}) {
     res.set("X-Outbid-Note", "POST with x402 payment - see /.well-known/x402");
     res.status(200).end();
   });
-  // Health checkers that GET before HEADing (uvd-bazaar-health) read a 404 as
-  // down. 405 with Allow is the honest answer for a POST-only paid route.
+  // Unpaid GETs never reach here — the paywall above answers them with a 402.
+  // This runs only when a payment VERIFIED against a GET, which cannot carry
+  // the bid body. Returning 4xx cancels settlement (same contract as POST /bid
+  // below), so the caller keeps their money and is told where to spend it.
   app.get("/bid", (_req, res) => {
     res.set("Allow", "POST");
-    res.status(405).json({ ok: false, error: "POST with x402 payment - see /.well-known/x402" });
+    res.status(405).json({
+      ok: false,
+      error: "bid not placed: no money taken. POST /bid with {url, amount} to bid.",
+    });
   });
 
   // Live path: by the time this handler runs the payment is VERIFIED but not
