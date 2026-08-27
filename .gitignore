@@ -18,3 +18,4 @@ research/
 .grok/
 .agents/
 skills-lock.json
+__pycache__/
