@@ -2,9 +2,9 @@
 
 If you have no next URL, or the last seller died / returned 402 / timed out: do not guess a URL.
 
-Prefer `skills/outbid/smart-fetch.js` (`smartFetch(url, options, wallet)`). Origin 402 → pay origin. After an origin HTML 200: fat HTML (>32KiB, client heuristic) or `{markdown:true}` → `GET https://reader.outbid.sh/scrape?url=` ($0.005; 200 is markdown JSON). JS wall still spends the $0.005; `{markdown:true}` returns 422 `needs_browser`, fat-HTML heuristic keeps origin HTML. Reader throw → origin, not `/route`. Dead/timeout → one `/route` ($0.01). Reachable 404/5xx is returned, not hopped. Payment fail is not origin fail — do not `/route`. Strip auth/cookie/payment on hop; only `x-outbid-*` `forward_headers`.
+Prefer `skills/outbid/smart-fetch.js` (`smartFetch(url, options, wallet)`). Origin 402 → pay origin. After an origin HTML 200: fat HTML (>32KiB, client heuristic) or `{markdown:true}` → `GET https://reader.outbid.sh/scrape?url=` ($0.005; 200 is markdown JSON). JS wall still spends the $0.005; `{markdown:true}` returns 422 `needs_browser`, fat-HTML heuristic keeps origin HTML. **Do not** auto-follow 422 onto `/browse`. `{browser:true}` (opt-in, not implied by markdown) → `GET https://reader.outbid.sh/browse?url=` ($0.05). Reader/browse throw → origin, not `/route`. Dead/timeout → one `/route` ($0.01). Reachable 404/5xx is returned, not hopped. Payment fail is not origin fail — do not `/route`. Strip auth/cookie/payment on hop; only `x-outbid-*` `forward_headers`.
 
-Do not call this on a working diet. Do not bid the reader onto `#1`.
+Do not call this on a working diet. Do not bid the reader or `/browse` onto `#1`.
 
 ## Sellers: dying-words fallback
 

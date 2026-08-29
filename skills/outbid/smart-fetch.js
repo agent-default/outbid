@@ -1,7 +1,7 @@
 // smartFetch(url, options, wallet). One paid /route max. Payment fail ≠ origin fail.
 export const FAT_HTML_BYTES = 32 * 1024;
 export const metrics = {
-  origin_402_paid: 0, origin_rate_limited: 0, origin_failure: 0, reader_paid: 0,
+  origin_402_paid: 0, origin_rate_limited: 0, origin_failure: 0, reader_paid: 0, browse_paid: 0,
   route_paid: 0, payment_authorization_failed: 0, fallback_success: 0, fallback_failed: 0,
 };
 export const circuits = new Map();
@@ -10,6 +10,16 @@ const PAY_MSG = /failed to (parse payment|create payment payload)|payment alread
 const bump = (k) => { metrics[k]++; };
 const cancel = (r) => { try { r.body?.cancel?.(); } catch { /* undici */ } };
 const hostOf = (u) => { try { return new URL(String(u)).host; } catch { return ""; } };
+export function browseFromScrape(scrapeBase) {
+  try {
+    const u = new URL(scrapeBase);
+    u.search = "";
+    u.pathname = `${u.pathname.replace(/\/scrape\/?$/, "")}/browse`;
+    return u.toString().replace(/\/$/, "");
+  } catch {
+    return "https://reader.outbid.sh/browse";
+  }
+}
 export class SmartFetchError extends Error {
   constructor(message, info) { super(message); this.name = "SmartFetchError"; Object.assign(this, info); }
 }
@@ -35,8 +45,9 @@ function mixHeaders(rest, forward, allow) {
   return out;
 }
 export async function smartFetch(url, options = {}, wallet) {
-  const { markdown: wantMd = false, reader, paid, fallbackOnRateLimit: _rl, headerAllowlist, ...rest } = options;
+  const { markdown: wantMd = false, browser: wantBrowse = false, reader, browse, paid, fallbackOnRateLimit: _rl, headerAllowlist, ...rest } = options;
   const base = reader || process.env.X402_READER_URL || "https://reader.outbid.sh/scrape";
+  const bbase = browse || process.env.X402_BROWSE_URL || browseFromScrape(base);
   const originHost = hostOf(url);
   const cool = circuits.get(originHost);
   if (cool && cool.until > Date.now()) fail("origin", "cooldown", { retryable: true, message: "origin cooldown" });
@@ -68,12 +79,19 @@ export async function smartFetch(url, options = {}, wallet) {
   const ct = r.headers.get("content-type") || "";
   if (r.ok && ct.includes("text/html")) {
     try {
-      const n = Number(r.headers.get("content-length"));
-      const bytes = n > 0 ? n : (await r.clone().arrayBuffer()).byteLength;
-      if (wantMd || bytes > FAT_HTML_BYTES) {
-        let s; try { s = await x(`${base}?url=${encodeURIComponent(String(url))}`); } catch { return r; }
-        if (s.ok || (s.status === 422 && wantMd)) { bump("reader_paid"); cancel(r); return s; }
+      const q = `url=${encodeURIComponent(String(url))}`;
+      if (wantBrowse) {
+        let s; try { s = await x(`${bbase}?${q}`); } catch { return r; }
+        if (s.ok || s.status === 422) { if (s.ok) bump("browse_paid"); cancel(r); return s; }
         cancel(s);
+      } else {
+        const n = Number(r.headers.get("content-length"));
+        const bytes = n > 0 ? n : (await r.clone().arrayBuffer()).byteLength;
+        if (wantMd || bytes > FAT_HTML_BYTES) {
+          let s; try { s = await x(`${base}?${q}`); } catch { return r; }
+          if (s.ok || (s.status === 422 && wantMd)) { bump("reader_paid"); cancel(r); return s; }
+          cancel(s);
+        }
       }
     } catch { /* keep origin */ }
   }
