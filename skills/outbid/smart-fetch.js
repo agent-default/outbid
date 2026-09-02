@@ -62,6 +62,9 @@ export async function smartFetch(url, options = {}, wallet) {
   try { r = await x(url, rest); }
   catch (err) {
     const m = String(err?.message || err);
+    if (err?.name === "TwzrdPolicyAbortError" || err?.name === "TwzrdWashAbortError") {
+      fail("policy", err.name, { paymentAttempted: false, retryable: false, message: m });
+    }
     if (PAY_MSG.test(m) || payAttempted) {
       bump("payment_authorization_failed");
       fail("origin", payAttempted && !PAY_MSG.test(m) ? "pay_uncertain" : "pay_fail", { paymentAttempted: true, retryable: false, message: m });
