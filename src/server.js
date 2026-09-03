@@ -721,16 +721,18 @@ export async function createApp(overrides = {}) {
     });
   });
 
+  // Mirrors the /route|/next|/dispatch paywall's own payTo resolution
+  // (see the nextAccepts middleware above) so the declaration can never
+  // again disagree with the live 402 -- was single-rail, first-match-wins.
   function nextWellKnownAccepts() {
-    const p = store.ranked()[0]?.last_payer;
-    if (!p) return [];
-    if (/^0x[a-fA-F0-9]{40}$/.test(p) && cfg.EVM_ADDRESS) {
-      return [{ scheme: "exact", price: formatPrice(MIN_USDC), network: cfg.EVM_NETWORK, payTo: p }];
-    }
-    if (!p.startsWith("0x") && cfg.SVM_ADDRESS) {
-      return [{ scheme: "exact", price: formatPrice(MIN_USDC), network: cfg.SVM_NETWORK, payTo: p }];
-    }
-    return [];
+    const top = store.ranked()[0];
+    if (!top) return [];
+    const evm = top.last_payer_evm || (/^0x[a-fA-F0-9]{40}$/.test(top.last_payer || "") ? top.last_payer : null);
+    const svm = top.last_payer_svm || (top.last_payer && !top.last_payer.startsWith("0x") ? top.last_payer : null);
+    const out = [];
+    if (evm && cfg.EVM_ADDRESS) out.push({ scheme: "exact", price: formatPrice(MIN_USDC), network: cfg.EVM_NETWORK, payTo: evm });
+    if (svm && cfg.SVM_ADDRESS) out.push({ scheme: "exact", price: formatPrice(MIN_USDC), network: cfg.SVM_NETWORK, payTo: svm });
+    return out;
   }
 
   // RFC 9727 API catalog: honest linkset over surfaces that exist. No OAuth
