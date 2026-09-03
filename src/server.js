@@ -437,6 +437,29 @@ export async function createApp(overrides = {}) {
   // loopback port, so trust its forwarding headers: this makes req.protocol
   // honor x-forwarded-proto (https, not the http loopback origin).
   app.set("trust proxy", true);
+  // CORS: confirmed live before this that zero Access-Control-* headers
+  // existed anywhere on this app -- a fetch() running inside a browser tab,
+  // a Workers/Deno-style agent runtime, or a browser extension cannot read
+  // a 402 (or its payment-required header) cross-origin without this; it
+  // gets an opaque network error before it ever sees `accepts`. Wide open
+  // by design: every response here is either free discovery or a public
+  // paywall challenge, nothing behind it is per-origin sensitive.
+  app.use((req, res, next) => {
+    res.set("Access-Control-Allow-Origin", "*");
+    res.set(
+      "Access-Control-Expose-Headers",
+      "payment-required, x-payment-response, PAYMENT-REQUIRED, PAYMENT-RESPONSE",
+    );
+    if (req.method === "OPTIONS") {
+      res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.set(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Accept, X-Payment, Payment-Signature, Authorization",
+      );
+      return res.sendStatus(204);
+    }
+    next();
+  });
   // The x402 middleware builds the 402's resource.url from req.protocol +
   // req.headers.host — NOT our baseUrl() helper. Behind a proxy chain that can
   // leak the origin host (ts.net) and the http scheme. When a public base is
