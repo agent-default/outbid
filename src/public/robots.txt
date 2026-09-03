@@ -1,5 +1,10 @@
 # outbid.sh — RFC 9309. Machines are the audience.
 # Allow discovery. Disallow counted consume so crawlers do not inflate dispatch_total.
+# Exception: ChatGPT-User and Claude-Web are live user-directed fetches, not
+# indexing crawls -- disallowing them meant a real user asking their agent to
+# pay us would be refused before it ever saw a 402. Every pure crawl/train/
+# index bot (GPTBot, OAI-SearchBot, anthropic-ai, Google-Extended, Amazonbot,
+# Bytespider, CCBot, Applebot-Extended) stays disallowed on consume paths.
 # Machine index: https://outbid.sh/llms.txt · Skill: https://outbid.sh/skill.md
 Sitemap: https://outbid.sh/sitemap.xml
 
@@ -40,29 +45,15 @@ Disallow: /next
 Disallow: /dispatch/next
 Disallow: /bid
 
+# Live user-directed fetch, not an indexing crawl -- see the exception note
+# at the top of this file. Full Allow: / is the baseline; no Disallow here.
 User-agent: ChatGPT-User
 Allow: /
-Allow: /skill.md
-Allow: /top
-Allow: /llms.txt
-Allow: /.well-known/
-Disallow: /route
-Disallow: /dispatch
-Disallow: /next
-Disallow: /dispatch/next
-Disallow: /bid
 
+# Live user-directed fetch, not an indexing crawl -- see the exception note
+# at the top of this file. Full Allow: / is the baseline; no Disallow here.
 User-agent: Claude-Web
 Allow: /
-Allow: /skill.md
-Allow: /top
-Allow: /llms.txt
-Allow: /.well-known/
-Disallow: /route
-Disallow: /dispatch
-Disallow: /next
-Disallow: /dispatch/next
-Disallow: /bid
 
 User-agent: anthropic-ai
 Allow: /
