@@ -14,11 +14,19 @@ Unpaid is 402. Settled USDC on Base or Solana is credited. Non-refundable. Amoun
 
 Auth: none — no accounts, no keys, no OAuth. The payment is the auth (x402).
 
+Rails — Base (eip155:8453) and Solana, USDC, either works. Facilitator:
+https://facilitator.payai.network (PayAI, not Coinbase CDP). Machine-readable
+declaration, always current: https://outbid.sh/.well-known/x402
+
 Skill: https://outbid.sh/skill.md
 Install: npx skills add agent-default/outbid
 Spec: https://outbid.sh/openapi.json
 Meta: https://outbid.sh/api/meta
 Board: https://outbid.sh/api/board
+
+Also here: reader.outbid.sh — x402-native HTML-to-markdown. GET
+https://reader.outbid.sh/scrape?url= for $0.005 USDC. Charged only on a
+delivered scrape; a JS/login wall or dead upstream is free.
 
 Sellers: dying-words fallback. In your 402/429/5xx/maintenance responses, emit
   Link: <https://outbid.sh/top>; rel="fallback"; type="application/json"
