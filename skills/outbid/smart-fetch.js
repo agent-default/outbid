@@ -22,18 +22,75 @@ export function browseFromScrape(scrapeBase) {
   }
 }
 // --- TWZRD CHECK (optional, default off) -------------------------------------
-// Free pre-spend readiness on the seller a 402 names, before the payer signs.
-// Opt in per call with { preflight: "twzrd" } or env X402_PREFLIGHT=twzrd.
-// Never custody, never a payment path: one free POST, and block throws unpaid.
+// Free pre-spend readiness before the payer signs. Opt in per call with
+// { preflight: "twzrd" } or env X402_PREFLIGHT=twzrd. Never custody.
+// Assessment v1 is challenge-bound: wallet + endpoint observations, a mandate
+// decision, and delivered=null until a later paid check. If the accepted
+// challenge changes, the previous assessment cannot authorize it.
 export const TWZRD_PREFLIGHT_URL = process.env.TWZRD_PREFLIGHT_URL || "https://intel.twzrd.xyz/v1/intel/preflight";
 export const PREFLIGHT_TTL_MS = 5 * 60_000;
 export const PREFLIGHT_TIMEOUT_MS = 4000;
+export const ASSESSMENT_VERSION = 1;
 export const verdicts = new Map();
 
 const b64json = (raw) => { try { return JSON.parse(Buffer.from(String(raw), "base64").toString("utf8")); } catch { return null; } };
 
-// Both rails of one 402 are the same seller, so any advertised payTo that blocks
-// blocks the hop. Over-refusing an unpaid hop is the safe direction.
+export function normNetwork(n) {
+  const s = String(n || "");
+  if (s === "base" || s === "eip155:8453") return "eip155:8453";
+  if (s === "solana" || s === "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp") return "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+  return s;
+}
+
+export function challengeBind(url, method, accepts) {
+  const rails = [];
+  for (const a of accepts || []) {
+    if (!a?.payTo) continue;
+    rails.push({
+      payTo: String(a.payTo),
+      network: normNetwork(a.network),
+      asset: String(a.asset || ""),
+      amount: String(a.maxAmountRequired ?? a.amount ?? ""),
+      scheme: String(a.scheme || "exact"),
+    });
+  }
+  rails.sort((a, b) => `${a.network}:${a.payTo}`.localeCompare(`${b.network}:${b.payTo}`));
+  return { url: String(url || ""), method: String(method || "GET").toUpperCase(), rails };
+}
+
+export function challengeFingerprint(bind) {
+  return JSON.stringify({ url: bind.url, method: bind.method, rails: bind.rails });
+}
+
+export function assessmentAuthorizes(assessment, bind) {
+  return !!assessment && assessment.version === ASSESSMENT_VERSION
+    && challengeFingerprint(assessment.challenge) === challengeFingerprint(bind);
+}
+
+export function acceptedFromPayment(raw) {
+  const p = b64json(raw);
+  if (!p) return null;
+  const a = p.accepted || p;
+  if (!a?.payTo) return null;
+  return {
+    payTo: String(a.payTo),
+    network: normNetwork(a.network),
+    asset: String(a.asset || ""),
+    amount: String(a.amount ?? a.maxAmountRequired ?? ""),
+    scheme: String(a.scheme || "exact"),
+  };
+}
+
+export function assessmentCoversAccepted(assessment, accepted) {
+  if (!assessment || assessment.version !== ASSESSMENT_VERSION || !accepted?.payTo) return false;
+  return (assessment.challenge.rails || []).some((r) => (
+    r.payTo === accepted.payTo
+    && r.network === accepted.network
+    && r.amount === accepted.amount
+    && (!accepted.asset || !r.asset || r.asset === accepted.asset)
+  ));
+}
+
 export function sellersFromInvoice(body, header) {
   const accepts = (b64json(header)?.accepts) || body?.accepts || [];
   const out = [];
@@ -61,31 +118,105 @@ export async function twzrdCheck(seller, price, { url = TWZRD_PREFLIGHT_URL, now
     if (d === "allow" || d === "warn" || d === "block") {
       v = { seller, decision: d, cap: card.recommended_cap_usdc ?? null, at: now };
     }
-  } catch { /* the CHECK is advisory and free: an unreachable gate never becomes a block */ }
+  } catch { /* unreachable gate never becomes a block */ }
   verdicts.set(seller, v);
   bump(`preflight_${v.decision === "unavailable" ? "unavailable" : v.decision}`);
   return v;
 }
 
-// Reuses the name the payer catch already treats as terminal: no /route, no retry.
-export function policyAbort(v) {
-  const e = new Error(`twzrd preflight decision=block seller=${v.seller}`);
+export async function observeMethodHold(url, { fetchImpl = fetch, timeoutMs = PREFLIGHT_TIMEOUT_MS } = {}) {
+  if (!url || !/^https?:\/\//i.test(url)) return { method_hold: "unobserved" };
+  try {
+    const r = await fetchImpl(url, { method: "HEAD", signal: AbortSignal.timeout(timeoutMs) });
+    if (r.status === 402) return { method_hold: "hold", status: 402 };
+    if (r.status === 200) return { method_hold: "head_200", status: 200 };
+    return { method_hold: "other", status: r.status };
+  } catch {
+    return { method_hold: "unobserved" };
+  }
+}
+
+export function decideMandate(wallets, endpoint) {
+  const reasons = [];
+  if ((wallets || []).some((v) => v.decision === "block")) {
+    return { action: "refuse", reasons: ["wallet_block"], cap: null };
+  }
+  if (endpoint?.method_hold === "head_200") reasons.push("head_200_inspect");
+  const warn = (wallets || []).filter((v) => v.decision === "warn");
+  if (warn.length) {
+    const caps = warn.map((v) => Number(v.cap)).filter((n) => Number.isFinite(n));
+    return { action: "cap", reasons: ["wallet_warn", ...reasons], cap: caps.length ? Math.min(...caps) : null };
+  }
+  if ((wallets || []).length && (wallets || []).every((v) => v.decision === "unavailable")) {
+    return { action: "proceed", reasons: ["wallet_unavailable", ...reasons], cap: null };
+  }
+  return { action: "proceed", reasons: reasons.length ? reasons : ["wallet_no_block"], cap: null };
+}
+
+export function buildAssessment({ bind, wallets, endpoint, now = Date.now(), action, reasons, cap }) {
+  const missing = ["delivery_proof"];
+  if (!(wallets || []).length || (wallets || []).every((v) => v.decision === "unavailable")) missing.push("wallet_verdict");
+  if (!endpoint || endpoint.method_hold === "unobserved") missing.push("method_hold");
+  return {
+    version: ASSESSMENT_VERSION,
+    challenge: bind,
+    observed: {
+      at: now,
+      wallet: wallets || [],
+      endpoint: endpoint || { method_hold: "unobserved" },
+      delivery_proof: "unverified",
+      missing,
+    },
+    decided: { at: now, action, reasons: reasons || [], cap: cap ?? null },
+    delivered: null,
+  };
+}
+
+// A later paid check may attach delivery evidence. It must not rewrite observed or decided.
+export function recordDelivered(assessment, established, now = Date.now()) {
+  return { ...assessment, delivered: { at: now, ...(established || {}) } };
+}
+
+export function policyAbort(assessment) {
+  const e = new Error(`twzrd preflight decision=refuse`);
   e.name = "TwzrdPolicyAbortError";
-  e.twzrd = v;
+  e.twzrd = assessment;
   return e;
 }
 
-export async function gate402(res, seen, check = twzrdCheck) {
-  const header = res.headers.get("payment-required");
+export function challengeChanged(previous, next) {
+  const e = new Error("twzrd assessment does not authorize this challenge");
+  e.name = "TwzrdChallengeChangedError";
+  e.twzrd = { previous, next };
+  return e;
+}
+
+export async function gate402(res, seen, check = twzrdCheck, req = {}) {
+  const header = res.headers.get("payment-required") || res.headers.get("PAYMENT-REQUIRED");
   let body = null;
   if (!header) { try { body = await res.clone().json(); } catch { /* not a JSON invoice */ } }
-  const blocked = [];
+  const accepts = (b64json(header)?.accepts) || body?.accepts || [];
+  const bind = challengeBind(req.url || "", req.method || "GET", accepts);
+  const prev = [...seen].reverse().find((s) => s && s.version === ASSESSMENT_VERSION);
+  if (prev && !assessmentAuthorizes(prev, bind)) throw challengeChanged(prev, bind);
+  const wallets = [];
   for (const { seller, price } of sellersFromInvoice(body, header)) {
-    const v = await check(seller, price);
-    seen.push(v);
-    if (v.decision === "block") blocked.push(v);
+    wallets.push(await check(seller, price));
   }
-  if (blocked.length) throw policyAbort(blocked[0]);
+  const endpoint = req.skipHead
+    ? { method_hold: "unobserved" }
+    : await observeMethodHold(bind.url, { fetchImpl: req.fetchImpl || fetch });
+  const { action, reasons, cap } = decideMandate(wallets, endpoint);
+  const assessment = buildAssessment({ bind, wallets, endpoint, action, reasons, cap });
+  seen.push(assessment);
+  if (action === "refuse") throw policyAbort(assessment);
+}
+
+export function assertPaymentMatchesAssessment(seen, paymentRaw) {
+  const last = [...seen].reverse().find((s) => s && s.version === ASSESSMENT_VERSION);
+  const accepted = acceptedFromPayment(paymentRaw);
+  if (!last || !accepted) return;
+  if (!assessmentCoversAccepted(last, accepted)) throw challengeChanged(last, accepted);
 }
 
 export class SmartFetchError extends Error {
@@ -138,12 +269,18 @@ async function runFetch(url, options, wallet, seen) {
   if (cool && cool.until > Date.now()) fail("origin", "cooldown", { retryable: true, message: "origin cooldown" });
   let payAttempted = false;
   const inner = async (input, init) => {
-    const h = new Request(input, init).headers;
+    const req = new Request(input, init);
+    const h = req.headers;
     const paying = h.has("PAYMENT-SIGNATURE") || h.has("X-PAYMENT");
     if (paying) payAttempted = true;
+    if (checking && paying) {
+      assertPaymentMatchesAssessment(seen, h.get("PAYMENT-SIGNATURE") || h.get("X-PAYMENT"));
+    }
     const res = await fetch(input, init);
     // The unpaid 402 is the only place the seller is known and nothing is spent yet.
-    if (checking && !paying && res.status === 402) await gate402(res, seen);
+    if (checking && !paying && res.status === 402) {
+      await gate402(res, seen, twzrdCheck, { url: req.url, method: req.method });
+    }
     return res;
   };
   const x = paid || (await import("@x402/fetch")).wrapFetchWithPayment(inner, wallet);
@@ -151,7 +288,7 @@ async function runFetch(url, options, wallet, seen) {
   try { r = await x(url, rest); }
   catch (err) {
     const m = String(err?.message || err);
-    if (err?.name === "TwzrdPolicyAbortError" || err?.name === "TwzrdWashAbortError") {
+    if (err?.name === "TwzrdPolicyAbortError" || err?.name === "TwzrdWashAbortError" || err?.name === "TwzrdChallengeChangedError") {
       fail("policy", err.name, { paymentAttempted: false, retryable: false, message: m });
     }
     if (PAY_MSG.test(m) || payAttempted) {
