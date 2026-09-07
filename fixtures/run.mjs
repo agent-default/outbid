@@ -7,6 +7,7 @@ import {
   challengeBind, buildAssessment, decideMandate, assessmentAuthorizes,
   assessmentCoversAccepted, acceptedFromPayment, recordDelivered, ASSESSMENT_VERSION,
 } from "../skills/outbid/smart-fetch.js";
+import { recovery } from "../skills/outbid/recovery.js";
 
 const SPEC = JSON.parse(fs.readFileSync(new URL("./cases.json", import.meta.url), "utf8"));
 const URL_ = "https://fixture.invalid/paid-resource";
@@ -26,6 +27,7 @@ const WARN = [{ seller: RAIL.payTo, decision: "warn", cap: 0.05 }];
 const BLOCK = [{ seller: RAIL.payTo, decision: "block", cap: null }];
 const UNAVAIL = [{ seller: RAIL.payTo, decision: "unavailable", cap: null }];
 
+const sfe = (stage, errorClass) => Object.assign(new Error(errorClass), { name: "SmartFetchError", stage, errorClass });
 const covers = (a, o) => assessmentCoversAccepted(a, acceptedFromPayment(pay(o)));
 const payOutcome = (a, o) => (covers(a, o)
   ? { outcome: "authorized" }
@@ -44,6 +46,14 @@ const actual = {
   evidence_unavailable: (() => { const a = assess(UNAVAIL); return { outcome: a.decided.action, reasons: a.decided.reasons, missing: a.observed.missing }; })(),
   head_200_inspect:     (() => { const d = decideMandate([], { method_hold: "head_200" }); return { outcome: d.action, reasons: d.reasons }; })(),
   delivery_unverified:  { delivery_proof: A.observed.delivery_proof, delivered: A.delivered },
+  // Recovery: the next action the mandate permits, from failures that already exist.
+  recover_challenge_changed:    recovery(sfe("policy", "TwzrdChallengeChangedError")),
+  recover_settlement_uncertain: recovery(sfe("origin", "pay_uncertain")),
+  recover_login_wall:           recovery({ res: { status: 422, ok: false }, body: { reason: "needs_login" } }),
+  recover_bot_gate:             recovery({ res: { status: 422, ok: false }, body: { reason: "needs_bot" } }),
+  recover_200_unverified:       recovery({ res: { status: 200, ok: true }, body: {} }),
+  recover_exhausted_mandate:    recovery(sfe("policy", "TwzrdChallengeChangedError"), { mandate: { remaining_usdc: 0 } }),
+  recover_unclassified:         recovery(Object.assign(new Error("weird"), { name: "SomethingElse" })),
 };
 
 const subset = (exp, act) => Object.entries(exp).every(([k, v]) =>

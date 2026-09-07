@@ -5,16 +5,172 @@
   "network_required": false,
   "note": "Deterministic fixtures. No wallet, no signature, no settlement, no third-party request. Every verdict below is produced by the same code path a live payer uses; only the evidence source is stubbed.",
   "cases": [
-    { "id": "unchanged_terms",      "what": "payment presents exactly the assessed rail",           "expect": { "outcome": "authorized" } },
-    { "id": "changed_recipient",    "what": "same url and amount, different payTo",                  "expect": { "outcome": "refused", "error": "TwzrdChallengeChangedError", "paid": false } },
-    { "id": "changed_amount",       "what": "assessed 50000, presented 5000000",                     "expect": { "outcome": "refused", "error": "TwzrdChallengeChangedError", "paid": false } },
-    { "id": "asset_omitted",        "what": "payment drops the asset field a bound rail names",      "expect": { "outcome": "refused", "error": "TwzrdChallengeChangedError", "paid": false } },
-    { "id": "scheme_changed",       "what": "assessed scheme exact, presented upto",                 "expect": { "outcome": "refused", "error": "TwzrdChallengeChangedError", "paid": false } },
-    { "id": "challenge_reissued",   "what": "origin re-issues different terms mid-flight",           "expect": { "outcome": "refused", "authorizes": false } },
-    { "id": "wallet_block",         "what": "counterparty evidence returns block",                   "expect": { "outcome": "refuse", "reasons": ["wallet_block"] } },
-    { "id": "wallet_warn_caps",     "what": "counterparty evidence returns warn with a cap",         "expect": { "outcome": "cap", "cap": 0.05, "reasons": ["wallet_warn"] } },
-    { "id": "evidence_unavailable", "what": "counterparty evidence unreachable",                     "expect": { "outcome": "proceed", "reasons": ["wallet_unavailable"], "missing": ["delivery_proof", "wallet_verdict"] } },
-    { "id": "head_200_inspect",     "what": "endpoint answers HEAD 200 where GET is 402",            "expect": { "outcome": "proceed", "reasons": ["head_200_inspect"] } },
-    { "id": "delivery_unverified",  "what": "no paid check has run",                                 "expect": { "delivery_proof": "unverified", "delivered": null } }
+    {
+      "id": "unchanged_terms",
+      "what": "payment presents exactly the assessed rail",
+      "expect": {
+        "outcome": "authorized"
+      }
+    },
+    {
+      "id": "changed_recipient",
+      "what": "same url and amount, different payTo",
+      "expect": {
+        "outcome": "refused",
+        "error": "TwzrdChallengeChangedError",
+        "paid": false
+      }
+    },
+    {
+      "id": "changed_amount",
+      "what": "assessed 50000, presented 5000000",
+      "expect": {
+        "outcome": "refused",
+        "error": "TwzrdChallengeChangedError",
+        "paid": false
+      }
+    },
+    {
+      "id": "asset_omitted",
+      "what": "payment drops the asset field a bound rail names",
+      "expect": {
+        "outcome": "refused",
+        "error": "TwzrdChallengeChangedError",
+        "paid": false
+      }
+    },
+    {
+      "id": "scheme_changed",
+      "what": "assessed scheme exact, presented upto",
+      "expect": {
+        "outcome": "refused",
+        "error": "TwzrdChallengeChangedError",
+        "paid": false
+      }
+    },
+    {
+      "id": "challenge_reissued",
+      "what": "origin re-issues different terms mid-flight",
+      "expect": {
+        "outcome": "refused",
+        "authorizes": false
+      }
+    },
+    {
+      "id": "wallet_block",
+      "what": "counterparty evidence returns block",
+      "expect": {
+        "outcome": "refuse",
+        "reasons": [
+          "wallet_block"
+        ]
+      }
+    },
+    {
+      "id": "wallet_warn_caps",
+      "what": "counterparty evidence returns warn with a cap",
+      "expect": {
+        "outcome": "cap",
+        "cap": 0.05,
+        "reasons": [
+          "wallet_warn"
+        ]
+      }
+    },
+    {
+      "id": "evidence_unavailable",
+      "what": "counterparty evidence unreachable",
+      "expect": {
+        "outcome": "proceed",
+        "reasons": [
+          "wallet_unavailable"
+        ],
+        "missing": [
+          "delivery_proof",
+          "wallet_verdict"
+        ]
+      }
+    },
+    {
+      "id": "head_200_inspect",
+      "what": "endpoint answers HEAD 200 where GET is 402",
+      "expect": {
+        "outcome": "proceed",
+        "reasons": [
+          "head_200_inspect"
+        ]
+      }
+    },
+    {
+      "id": "delivery_unverified",
+      "what": "no paid check has run",
+      "expect": {
+        "delivery_proof": "unverified",
+        "delivered": null
+      }
+    },
+    {
+      "id": "recover_challenge_changed",
+      "what": "refusal that sent nothing must not report possible settlement",
+      "expect": {
+        "reason": "challenge_changed",
+        "paid": "no",
+        "settlement": "none",
+        "next": "reassess",
+        "retry_same_terms": false
+      }
+    },
+    {
+      "id": "recover_settlement_uncertain",
+      "what": "payment sent, answer lost",
+      "expect": {
+        "reason": "settlement_uncertain",
+        "paid": "maybe",
+        "settlement": "uncertain",
+        "next": "reconcile_settlement"
+      }
+    },
+    {
+      "id": "recover_login_wall",
+      "what": "authentication is not something a mandate can grant itself",
+      "expect": {
+        "reason": "login_wall",
+        "next": "stop_attempt",
+        "needs_authority": true
+      }
+    },
+    {
+      "id": "recover_bot_gate",
+      "what": "a bot gate is not an authority problem",
+      "expect": {
+        "reason": "origin_challenge",
+        "next": "stop_attempt",
+        "needs_authority": false
+      }
+    },
+    {
+      "id": "recover_200_unverified",
+      "what": "a paid 200 is not delivery",
+      "expect": {
+        "reason": "returned_delivery_unverified",
+        "next": "verify_delivery"
+      }
+    },
+    {
+      "id": "recover_exhausted_mandate",
+      "what": "no allowance left withdraws permission to spend again",
+      "expect": {
+        "next": "do_not_pay",
+        "needs_authority": true
+      }
+    },
+    {
+      "id": "recover_unclassified",
+      "what": "an unknown failure names the unknown instead of guessing",
+      "expect": {
+        "reason": "unclassified",
+        "next": "abort"
+      }
+    }
   ]
 }

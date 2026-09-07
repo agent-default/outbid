@@ -31,6 +31,34 @@ evidence later cannot rewrite what was observed or decided.
   external payment, and every run is tagged `fixture: true` so it can never be
   counted as adoption.
 
+## Recovery: what the agent may do next
+
+A verdict says whether to proceed. A structured failure says how to continue.
+`recovery(outcomeOrError, { assessment, mandate })` maps what already happened
+into one action from a closed set — `do_not_pay`, `reassess`, `refresh_evidence`,
+`reconcile_settlement`, `wait_and_retry`, `stop_attempt`, `abort`,
+`verify_delivery` — plus `paid`, `settlement`, `retry_same_terms`,
+`needs_authority`, and an `unknown` array naming what could not be determined.
+
+It adds no behaviour. Every input it reads is already produced by smart-fetch;
+it stops the agent guessing which of them means "safe to try again".
+
+The distinctions that cost money:
+
+| Situation | paid | next |
+|---|---|---|
+| Terms changed before signing | `no` | `reassess` |
+| Payment sent, answer lost | `maybe` | `reconcile_settlement` |
+| Login wall | `no` | `stop_attempt`, needs authority |
+| Bot gate | `no` | `stop_attempt`, no authority will help |
+| Paid 200 returned | `yes` | `verify_delivery` — never "delivered" |
+| Mandate allowance exhausted | — | `do_not_pay` |
+| Failure we cannot classify | — | `abort`, with `unknown: ["failure_class"]` |
+
+A refusal that never sent a request reports `settlement: "none"`, so an agent is
+never sent to reconcile a payment that could not have happened; and a possible
+settlement never yields `wait_and_retry`, so it is never told to pay twice.
+
 ## Then enable it under your own authority
 
 The hook is off by default. Turn it on per call, with your wallet and your cap:
