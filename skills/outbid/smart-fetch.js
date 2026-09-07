@@ -167,6 +167,7 @@ export function nextForAssessment(assessment, { now = Date.now(), wallReason, pa
   if (payUncertain) return nextFor("reconcile_settlement");
   if (SELF_RECOVERABLE.has(wallReason)) return nextFor("reassess");
   if (WALL_REASONS.has(wallReason)) return nextFor("stop_auth_required");
+  if (wallReason) return nextFor("stop_unclassified");
   if (deliveryFailed) return nextFor("record_failed_delivery");
   if (assessment?.decided?.action === "refuse") return nextFor("escalate");
   if (assessment?.observed?.at && now - assessment.observed.at > PREFLIGHT_TTL_MS) return nextFor("refresh_assessment");
@@ -178,7 +179,8 @@ export function nextFromError(errorClass, extra = {}) {
   if (errorClass === "TwzrdChallengeChangedError") return nextFor("reassess");
   if (errorClass === "TwzrdPolicyAbortError" || errorClass === "TwzrdWashAbortError") return nextFor("escalate");
   if (SELF_RECOVERABLE.has(extra.wallReason)) return nextFor("reassess");
-  if (extra.wallReason) return nextFor("stop_auth_required");
+  if (WALL_REASONS.has(extra.wallReason)) return nextFor("stop_auth_required");
+  if (extra.wallReason) return nextFor("stop_unclassified");
   // A transient origin cooldown leaves the assessed terms valid; nothing was sent.
   if (errorClass === "cooldown") return nextFor("proceed");
   // Payment rejected or unauthorized: get a fresh decision, do not carry on.
@@ -381,7 +383,7 @@ function tag(r, seen) {
 async function tagWall(s) {
   let reason;
   try { reason = (await s.clone().json())?.reason; } catch { /* not json */ }
-  const next = nextForAssessment(null, { wallReason: WALL_REASONS.has(reason) ? reason : "needs_browser" });
+  const next = nextForAssessment(null, { wallReason: reason || "unclassified" });
   try { Object.defineProperty(s, "next", { value: next, enumerable: false }); } catch { /* frozen */ }
   return s;
 }

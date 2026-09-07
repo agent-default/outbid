@@ -131,4 +131,7 @@ test("needs_browser is self-recoverable, not a human interruption", async () => 
   assert.equal(checkBrowseExpectation({ reason: "needs_browser" }).next.action, "reassess");
   // a real wall still stops
   assert.equal(checkBrowseExpectation({ reason: "needs_login" }).next.action, "stop_auth_required");
+  // an unknown reason must not proceed and must not pretend to be needs_browser
+  assert.equal(nextForAssessment(null, { wallReason: "needs_captcha" }).action, "stop_unclassified");
+  assert.equal(nextFromError("x", { wallReason: "needs_captcha" }).action, "stop_unclassified");
 });
