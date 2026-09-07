@@ -1,0 +1,20 @@
+{
+  "suite": "twzrd-challenge-bound-assessment",
+  "version": 1,
+  "funds_required": false,
+  "network_required": false,
+  "note": "Deterministic fixtures. No wallet, no signature, no settlement, no third-party request. Every verdict below is produced by the same code path a live payer uses; only the evidence source is stubbed.",
+  "cases": [
+    { "id": "unchanged_terms",      "what": "payment presents exactly the assessed rail",           "expect": { "outcome": "authorized" } },
+    { "id": "changed_recipient",    "what": "same url and amount, different payTo",                  "expect": { "outcome": "refused", "error": "TwzrdChallengeChangedError", "paid": false } },
+    { "id": "changed_amount",       "what": "assessed 50000, presented 5000000",                     "expect": { "outcome": "refused", "error": "TwzrdChallengeChangedError", "paid": false } },
+    { "id": "asset_omitted",        "what": "payment drops the asset field a bound rail names",      "expect": { "outcome": "refused", "error": "TwzrdChallengeChangedError", "paid": false } },
+    { "id": "scheme_changed",       "what": "assessed scheme exact, presented upto",                 "expect": { "outcome": "refused", "error": "TwzrdChallengeChangedError", "paid": false } },
+    { "id": "challenge_reissued",   "what": "origin re-issues different terms mid-flight",           "expect": { "outcome": "refused", "authorizes": false } },
+    { "id": "wallet_block",         "what": "counterparty evidence returns block",                   "expect": { "outcome": "refuse", "reasons": ["wallet_block"] } },
+    { "id": "wallet_warn_caps",     "what": "counterparty evidence returns warn with a cap",         "expect": { "outcome": "cap", "cap": 0.05, "reasons": ["wallet_warn"] } },
+    { "id": "evidence_unavailable", "what": "counterparty evidence unreachable",                     "expect": { "outcome": "proceed", "reasons": ["wallet_unavailable"], "missing": ["delivery_proof", "wallet_verdict"] } },
+    { "id": "head_200_inspect",     "what": "endpoint answers HEAD 200 where GET is 402",            "expect": { "outcome": "proceed", "reasons": ["head_200_inspect"] } },
+    { "id": "delivery_unverified",  "what": "no paid check has run",                                 "expect": { "delivery_proof": "unverified", "delivered": null } }
+  ]
+}
