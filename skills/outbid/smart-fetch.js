@@ -148,8 +148,14 @@ export const NEXT = {
   reconcile_settlement: { action: "reconcile_settlement", retry_payment: false, human: false },
   record_failed_delivery: { action: "record_failed_delivery", retry_payment: "only_if_mandate_allows", human: false },
   escalate: { action: "escalate", retry_payment: false, human: "missing_authority" },
+  // An unclassifiable failure must not resolve to proceed. Naming the unknown is
+  // the whole point of a machine next.
+  stop_unclassified: { action: "stop_unclassified", retry_payment: false, human: "unclassified_failure" },
 };
-const WALL_REASONS = new Set(["needs_login", "needs_bot", "needs_browser"]);
+// A wall the agent cannot open itself. needs_browser is NOT one: the documented
+// recovery is opt-in { browser: true }, which the agent can set without a human.
+const WALL_REASONS = new Set(["needs_login", "needs_bot"]);
+const SELF_RECOVERABLE = new Set(["needs_browser"]);
 
 export function nextFor(kind) {
   const n = NEXT[kind];
@@ -159,6 +165,7 @@ export function nextFor(kind) {
 
 export function nextForAssessment(assessment, { now = Date.now(), wallReason, payUncertain, deliveryFailed } = {}) {
   if (payUncertain) return nextFor("reconcile_settlement");
+  if (SELF_RECOVERABLE.has(wallReason)) return nextFor("reassess");
   if (WALL_REASONS.has(wallReason)) return nextFor("stop_auth_required");
   if (deliveryFailed) return nextFor("record_failed_delivery");
   if (assessment?.decided?.action === "refuse") return nextFor("escalate");
@@ -170,8 +177,17 @@ export function nextFromError(errorClass, extra = {}) {
   if (errorClass === "pay_uncertain") return nextFor("reconcile_settlement");
   if (errorClass === "TwzrdChallengeChangedError") return nextFor("reassess");
   if (errorClass === "TwzrdPolicyAbortError" || errorClass === "TwzrdWashAbortError") return nextFor("escalate");
+  if (SELF_RECOVERABLE.has(extra.wallReason)) return nextFor("reassess");
   if (extra.wallReason) return nextFor("stop_auth_required");
-  return extra.retryable === true ? nextFor("proceed") : nextFor("proceed");
+  // A transient origin cooldown leaves the assessed terms valid; nothing was sent.
+  if (errorClass === "cooldown") return nextFor("proceed");
+  // Payment rejected or unauthorized: get a fresh decision, do not carry on.
+  if (errorClass === "pay_fail") return nextFor("reassess");
+  // /route was paid for and answered badly: settlement state is not established.
+  if (errorClass === "route_fail") return nextFor("reconcile_settlement");
+  // The route tick settled and the forwarded fetch failed: paid, not delivered.
+  if (errorClass === "fallback_fail") return nextFor("record_failed_delivery");
+  return nextFor("stop_unclassified");
 }
 
 export function decideMandate(wallets, endpoint) {
@@ -260,6 +276,9 @@ export function beforePayment(selectedRequirements, assessment, { now = Date.now
 
 export function checkBrowseExpectation(body, { minWords = 10 } = {}) {
   const reason = body?.reason;
+  if (SELF_RECOVERABLE.has(reason)) {
+    return { met: false, kind: "wall", reason, next: nextFor("reassess") };
+  }
   if (WALL_REASONS.has(reason)) {
     return { met: false, kind: "wall", reason, next: nextFor("stop_auth_required") };
   }

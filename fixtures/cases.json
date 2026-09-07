@@ -111,65 +111,73 @@
     },
     {
       "id": "recover_challenge_changed",
-      "what": "refusal that sent nothing must not report possible settlement",
+      "what": "refusal that sent nothing: reassess, never reconcile",
       "expect": {
-        "reason": "challenge_changed",
-        "paid": "no",
-        "settlement": "none",
-        "next": "reassess",
-        "retry_same_terms": false
+        "action": "reassess",
+        "retry_payment": false
       }
     },
     {
       "id": "recover_settlement_uncertain",
-      "what": "payment sent, answer lost",
+      "what": "payment sent, answer lost: reconcile, never re-pay",
       "expect": {
-        "reason": "settlement_uncertain",
-        "paid": "maybe",
-        "settlement": "uncertain",
-        "next": "reconcile_settlement"
+        "action": "reconcile_settlement",
+        "retry_payment": false
       }
     },
     {
       "id": "recover_login_wall",
-      "what": "authentication is not something a mandate can grant itself",
+      "what": "a login wall needs authority the mandate cannot grant",
       "expect": {
-        "reason": "login_wall",
-        "next": "stop_attempt",
-        "needs_authority": true
+        "action": "stop_auth_required",
+        "retry_payment": false
       }
     },
     {
       "id": "recover_bot_gate",
-      "what": "a bot gate is not an authority problem",
+      "what": "a bot gate stops the attempt",
       "expect": {
-        "reason": "origin_challenge",
-        "next": "stop_attempt",
-        "needs_authority": false
+        "action": "stop_auth_required",
+        "retry_payment": false
       }
     },
     {
-      "id": "recover_200_unverified",
-      "what": "a paid 200 is not delivery",
+      "id": "recover_needs_browser",
+      "what": "self-recoverable: opt in to browse, do not interrupt a human",
       "expect": {
-        "reason": "returned_delivery_unverified",
-        "next": "verify_delivery"
+        "action": "reassess",
+        "retry_payment": false
       }
     },
     {
-      "id": "recover_exhausted_mandate",
-      "what": "no allowance left withdraws permission to spend again",
+      "id": "recover_wallet_block",
+      "what": "counterparty refusal escalates for missing authority",
       "expect": {
-        "next": "do_not_pay",
-        "needs_authority": true
+        "action": "escalate",
+        "human": "missing_authority"
+      }
+    },
+    {
+      "id": "recover_paid_body_short",
+      "what": "paid body fails the bounded check",
+      "expect": {
+        "action": "record_failed_delivery",
+        "retry_payment": "only_if_mandate_allows"
+      }
+    },
+    {
+      "id": "recover_paid_body_ok",
+      "what": "paid body meets the bounded check",
+      "expect": {
+        "action": "proceed"
       }
     },
     {
       "id": "recover_unclassified",
-      "what": "an unknown failure names the unknown instead of guessing",
+      "what": "an unknown failure names the unknown, never proceed",
       "expect": {
-        "reason": "unclassified",
-        "next": "abort"
+        "action": "stop_unclassified",
+        "human": "unclassified_failure"
       }
     }
   ]

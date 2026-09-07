@@ -110,3 +110,25 @@ test("gate402 refuse still unpaid and next is escalate", async () => {
     (e) => e.name === "TwzrdPolicyAbortError" && e.next.action === "escalate" && e.next.retry_payment === false,
   );
 });
+
+test("no failure class resolves to proceed by default", async () => {
+  const { nextFromError, NEXT } = await import("../skills/outbid/smart-fetch.js");
+  // The only class that may legitimately say proceed is a transient cooldown:
+  // nothing was sent and the assessed terms are still valid.
+  assert.equal(nextFromError("cooldown").action, "proceed");
+  for (const cls of ["pay_fail", "route_fail", "fallback_fail", "totally_unknown", ""]) {
+    assert.notEqual(nextFromError(cls).action, "proceed", `${cls} must not resolve to proceed`);
+  }
+  assert.equal(nextFromError("totally_unknown").action, "stop_unclassified");
+  assert.equal(nextFromError("totally_unknown").human, "unclassified_failure");
+  // Money-critical: nothing ever authorizes an unconditional repeat payment.
+  for (const k of Object.keys(NEXT)) assert.notEqual(NEXT[k].retry_payment, true);
+});
+
+test("needs_browser is self-recoverable, not a human interruption", async () => {
+  const { nextFromError, checkBrowseExpectation } = await import("../skills/outbid/smart-fetch.js");
+  assert.equal(nextFromError("x", { wallReason: "needs_browser" }).action, "reassess");
+  assert.equal(checkBrowseExpectation({ reason: "needs_browser" }).next.action, "reassess");
+  // a real wall still stops
+  assert.equal(checkBrowseExpectation({ reason: "needs_login" }).next.action, "stop_auth_required");
+});
