@@ -140,6 +140,40 @@ export async function observeMethodHold(url, { fetchImpl = fetch, timeoutMs = PR
   }
 }
 
+export const NEXT = {
+  proceed: { action: "proceed", retry_payment: false, human: false },
+  refresh_assessment: { action: "refresh_assessment", retry_payment: false, human: false },
+  reassess: { action: "reassess", retry_payment: false, human: false },
+  stop_auth_required: { action: "stop_auth_required", retry_payment: false, human: false },
+  reconcile_settlement: { action: "reconcile_settlement", retry_payment: false, human: false },
+  record_failed_delivery: { action: "record_failed_delivery", retry_payment: "only_if_mandate_allows", human: false },
+  escalate: { action: "escalate", retry_payment: false, human: "missing_authority" },
+};
+const WALL_REASONS = new Set(["needs_login", "needs_bot", "needs_browser"]);
+
+export function nextFor(kind) {
+  const n = NEXT[kind];
+  if (!n) throw new Error(`unknown next kind: ${kind}`);
+  return { action: n.action, retry_payment: n.retry_payment, human: n.human };
+}
+
+export function nextForAssessment(assessment, { now = Date.now(), wallReason, payUncertain, deliveryFailed } = {}) {
+  if (payUncertain) return nextFor("reconcile_settlement");
+  if (WALL_REASONS.has(wallReason)) return nextFor("stop_auth_required");
+  if (deliveryFailed) return nextFor("record_failed_delivery");
+  if (assessment?.decided?.action === "refuse") return nextFor("escalate");
+  if (assessment?.observed?.at && now - assessment.observed.at > PREFLIGHT_TTL_MS) return nextFor("refresh_assessment");
+  return nextFor("proceed");
+}
+
+export function nextFromError(errorClass, extra = {}) {
+  if (errorClass === "pay_uncertain") return nextFor("reconcile_settlement");
+  if (errorClass === "TwzrdChallengeChangedError") return nextFor("reassess");
+  if (errorClass === "TwzrdPolicyAbortError" || errorClass === "TwzrdWashAbortError") return nextFor("escalate");
+  if (extra.wallReason) return nextFor("stop_auth_required");
+  return extra.retryable === true ? nextFor("proceed") : nextFor("proceed");
+}
+
 export function decideMandate(wallets, endpoint) {
   const reasons = [];
   if ((wallets || []).some((v) => v.decision === "block")) {
@@ -161,7 +195,7 @@ export function buildAssessment({ bind, wallets, endpoint, now = Date.now(), act
   const missing = ["delivery_proof"];
   if (!(wallets || []).length || (wallets || []).every((v) => v.decision === "unavailable")) missing.push("wallet_verdict");
   if (!endpoint || endpoint.method_hold === "unobserved") missing.push("method_hold");
-  return {
+  const assessment = {
     version: ASSESSMENT_VERSION,
     challenge: bind,
     observed: {
@@ -174,6 +208,8 @@ export function buildAssessment({ bind, wallets, endpoint, now = Date.now(), act
     decided: { at: now, action, reasons: reasons || [], cap: cap ?? null },
     delivered: null,
   };
+  assessment.next = nextForAssessment(assessment, { now });
+  return assessment;
 }
 
 // A later paid check may attach delivery evidence. It must not rewrite observed or decided.
@@ -182,17 +218,69 @@ export function recordDelivered(assessment, established, now = Date.now()) {
 }
 
 export function policyAbort(assessment) {
+  const next = nextFor("escalate");
+  if (assessment && !assessment.next) assessment.next = next;
   const e = new Error(`twzrd preflight decision=refuse`);
   e.name = "TwzrdPolicyAbortError";
   e.twzrd = assessment;
+  e.next = next;
   return e;
 }
 
-export function challengeChanged(previous, next) {
+export function challengeChanged(previous, nextChallenge) {
+  const next = nextFor("reassess");
   const e = new Error("twzrd assessment does not authorize this challenge");
   e.name = "TwzrdChallengeChangedError";
-  e.twzrd = { previous, next };
+  e.twzrd = { previous, next: nextChallenge };
+  e.next = next;
   return e;
+}
+
+// Sit on x402 onBeforePaymentCreation / PayAI beforePayment. Abort only; never mutate terms.
+export function beforePayment(selectedRequirements, assessment, { now = Date.now() } = {}) {
+  if (!assessment) return { abort: true, reason: "no assessment", next: nextFor("refresh_assessment") };
+  const stale = nextForAssessment(assessment, { now });
+  if (stale.action === "refresh_assessment") {
+    return { abort: true, reason: "assessment stale", next: stale };
+  }
+  if (assessment.decided?.action === "refuse") {
+    return { abort: true, reason: "mandate refuse", next: nextFor("escalate") };
+  }
+  const accepted = {
+    payTo: selectedRequirements?.payTo,
+    network: normNetwork(selectedRequirements?.network),
+    asset: String(selectedRequirements?.asset || ""),
+    amount: String(selectedRequirements?.amount ?? selectedRequirements?.maxAmountRequired ?? ""),
+    scheme: String(selectedRequirements?.scheme || "exact"),
+  };
+  if (!assessmentCoversAccepted(assessment, accepted)) {
+    return { abort: true, reason: "challenge changed", next: nextFor("reassess") };
+  }
+}
+
+export function checkBrowseExpectation(body, { minWords = 10 } = {}) {
+  const reason = body?.reason;
+  if (WALL_REASONS.has(reason)) {
+    return { met: false, kind: "wall", reason, next: nextFor("stop_auth_required") };
+  }
+  const words = Number(body?.word_count);
+  if (body?.ok === true && Number.isFinite(words) && words >= minWords) {
+    return { met: true, kind: "output", word_count: words, next: nextFor("proceed") };
+  }
+  return { met: false, kind: "output", word_count: Number.isFinite(words) ? words : null, next: nextFor("record_failed_delivery") };
+}
+
+export function applyDeliveryCheck(assessment, body, opts) {
+  const result = checkBrowseExpectation(body, opts);
+  const out = recordDelivered(assessment, {
+    met: result.met,
+    kind: result.kind,
+    reason: result.reason,
+    word_count: result.word_count,
+  });
+  out.observed = assessment.observed;
+  out.next = result.next;
+  return out;
 }
 
 export async function gate402(res, seen, check = twzrdCheck, req = {}) {
@@ -227,8 +315,11 @@ export class SmartFetchError extends Error {
   constructor(message, info) { super(message); this.name = "SmartFetchError"; Object.assign(this, info); }
 }
 function fail(stage, errorClass, extra = {}) {
+  const next = extra.next || nextFromError(errorClass, extra);
   throw new SmartFetchError(extra.message || errorClass, {
-    stage, errorClass, status: extra.status, paymentAttempted: !!extra.paymentAttempted, retryable: extra.retryable === true,
+    stage, errorClass, status: extra.status, paymentAttempted: !!extra.paymentAttempted,
+    retryable: extra.retryable === true,
+    next,
   });
 }
 function trip(h, cls, ms) {
@@ -258,8 +349,22 @@ export async function smartFetch(url, options = {}, wallet) {
 }
 
 function tag(r, seen) {
-  if (r && seen.length) { try { Object.defineProperty(r, "twzrd", { value: seen.slice(), enumerable: false }); } catch { /* frozen */ } }
+  if (r && seen.length) {
+    try { Object.defineProperty(r, "twzrd", { value: seen.slice(), enumerable: false }); } catch { /* frozen */ }
+    const last = [...seen].reverse().find((s) => s && s.version === ASSESSMENT_VERSION);
+    if (last?.next) {
+      try { Object.defineProperty(r, "next", { value: last.next, enumerable: false }); } catch { /* frozen */ }
+    }
+  }
   return r;
+}
+
+async function tagWall(s) {
+  let reason;
+  try { reason = (await s.clone().json())?.reason; } catch { /* not json */ }
+  const next = nextForAssessment(null, { wallReason: WALL_REASONS.has(reason) ? reason : "needs_browser" });
+  try { Object.defineProperty(s, "next", { value: next, enumerable: false }); } catch { /* frozen */ }
+  return s;
 }
 
 async function runFetch(url, options, wallet, seen) {
@@ -293,11 +398,12 @@ async function runFetch(url, options, wallet, seen) {
   catch (err) {
     const m = String(err?.message || err);
     if (err?.name === "TwzrdPolicyAbortError" || err?.name === "TwzrdWashAbortError" || err?.name === "TwzrdChallengeChangedError") {
-      fail("policy", err.name, { paymentAttempted: false, retryable: false, message: m });
+      fail("policy", err.name, { paymentAttempted: false, retryable: false, message: m, next: err.next || nextFromError(err.name) });
     }
     if (PAY_MSG.test(m) || payAttempted) {
       bump("payment_authorization_failed");
-      fail("origin", payAttempted && !PAY_MSG.test(m) ? "pay_uncertain" : "pay_fail", { paymentAttempted: true, retryable: false, message: m });
+      const cls = payAttempted && !PAY_MSG.test(m) ? "pay_uncertain" : "pay_fail";
+      fail("origin", cls, { paymentAttempted: true, retryable: false, message: m, next: nextFromError(cls) });
     }
     bump("origin_failure"); trip(originHost, "origin_fail");
     return routeOnce(x, rest, headerAllowlist);
@@ -315,14 +421,24 @@ async function runFetch(url, options, wallet, seen) {
       const q = `url=${encodeURIComponent(String(url))}`;
       if (wantBrowse) {
         let s; try { s = await x(`${bbase}?${q}`); } catch { return r; }
-        if (s.ok || s.status === 422) { if (s.ok) bump("browse_paid"); cancel(r); return s; }
+        if (s.ok || s.status === 422) {
+          if (s.ok) bump("browse_paid");
+          cancel(r);
+          if (s.status === 422) await tagWall(s);
+          return s;
+        }
         cancel(s);
       } else {
         const n = Number(r.headers.get("content-length"));
         const bytes = n > 0 ? n : (await r.clone().arrayBuffer()).byteLength;
         if (wantMd || bytes > FAT_HTML_BYTES) {
           let s; try { s = await x(`${base}?${q}`); } catch { return r; }
-          if (s.ok || (s.status === 422 && wantMd)) { bump("reader_paid"); cancel(r); return s; }
+          if (s.ok || (s.status === 422 && wantMd)) {
+            bump("reader_paid");
+            cancel(r);
+            if (s.status === 422) await tagWall(s);
+            return s;
+          }
           cancel(s);
         }
       }

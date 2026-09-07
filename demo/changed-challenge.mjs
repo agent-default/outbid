@@ -43,7 +43,8 @@ line(`   wallet verdicts   ${wallets.map((v) => `${v.seller.slice(0, 8)}=${v.dec
 line(`   endpoint observed method_hold=${endpoint.method_hold}`);
 line(`   missing evidence  ${assessment.observed.missing.join(", ")}`);
 line(`   delivery_proof    ${assessment.observed.delivery_proof}`);
-line(`   DECISION          ${action}${cap != null ? ` cap=$${cap}` : ""}  reasons=[${reasons.join(", ")}]\n`);
+line(`   DECISION          ${action}${cap != null ? ` cap=$${cap}` : ""}  reasons=[${reasons.join(", ")}]`);
+line(`   NEXT              ${assessment.next.action}  retry_payment=${assessment.next.retry_payment}\n`);
 
 const pay = (accepted) => Buffer.from(JSON.stringify({ x402Version: 2, accepted, payload: { sig: "<not-signed>" } })).toString("base64");
 
@@ -61,6 +62,7 @@ try {
   line("   -> LEAK: payment allowed\n");
 } catch (e) {
   line(`   -> REFUSED ${e.name}  unpaid, before the request left the process`);
+  line(`      next: ${e.next.action} retry_payment=${e.next.retry_payment}`);
   line(`      assessed payees : ${e.twzrd.previous.challenge.rails.map((r) => r.payTo.slice(0, 12)).join(", ")}`);
   line(`      presented payee : ${e.twzrd.next.payTo.slice(0, 12)}\n`);
 }
@@ -72,6 +74,7 @@ try {
   line("   -> LEAK: payment allowed\n");
 } catch (e) {
   line(`   -> REFUSED ${e.name}  unpaid`);
+  line(`      next: ${e.next.action} retry_payment=${e.next.retry_payment}`);
   line(`      assessed amount : ${e.twzrd.previous.challenge.rails.find((r) => r.payTo === READER_SOL)?.amount}`);
   line(`      presented amount: ${e.twzrd.next.amount}\n`);
 }

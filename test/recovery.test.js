@@ -1,79 +1,112 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { recovery, NEXT, EVIDENCE_TTL_MS } from "../skills/outbid/recovery.js";
-import { challengeBind, buildAssessment } from "../skills/outbid/smart-fetch.js";
+import {
+  PREFLIGHT_TTL_MS, applyDeliveryCheck, beforePayment,
+  buildAssessment, challengeBind, challengeChanged, checkBrowseExpectation,
+  gate402, nextFor, nextForAssessment, nextFromError, policyAbort,
+} from "../skills/outbid/smart-fetch.js";
 
-const sfe = (stage, errorClass, extra = {}) => Object.assign(new Error(errorClass), { name: "SmartFetchError", stage, errorClass, ...extra });
-const RAIL = { scheme: "exact", network: "solana", asset: "EPjF", maxAmountRequired: "50000", payTo: "F1Ab" };
-const fresh = (now) => buildAssessment({ bind: challengeBind("https://x.test/r", "GET", [RAIL]), wallets: [], endpoint: { method_hold: "hold" }, action: "proceed", reasons: [], now });
+const rail = {
+  scheme: "exact", network: "solana",
+  asset: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  maxAmountRequired: "50000",
+  payTo: "F1AbWuXJcBT9arW9wc6Xr2vom5NBtngWsz6Ht16jRBLM",
+};
+const bind = challengeBind("https://example.com/paid", "GET", [rail]);
+const allowWallet = [{ seller: rail.payTo, decision: "allow", cap: null, at: Date.now() }];
 
-test("a refusal that sent nothing is never reported as possible settlement", () => {
-  const r = recovery(sfe("policy", "TwzrdChallengeChangedError"));
-  assert.equal(r.reason, "challenge_changed");
-  assert.equal(r.paid, "no");
-  assert.equal(r.settlement, "none");
-  assert.equal(r.next, NEXT.REASSESS);
-  assert.equal(r.retry_same_terms, false);
+test("next mapper: each recovery condition, and retry_payment never true on uncertain pay or wall", () => {
+  assert.deepEqual(nextFor("reassess"), { action: "reassess", retry_payment: false, human: false });
+  assert.deepEqual(nextFor("stop_auth_required"), { action: "stop_auth_required", retry_payment: false, human: false });
+  assert.deepEqual(nextFor("reconcile_settlement"), { action: "reconcile_settlement", retry_payment: false, human: false });
+  assert.deepEqual(nextFor("escalate"), { action: "escalate", retry_payment: false, human: "missing_authority" });
+  assert.equal(nextFor("record_failed_delivery").retry_payment, "only_if_mandate_allows");
+  assert.equal(nextFromError("pay_uncertain").action, "reconcile_settlement");
+  assert.equal(nextFromError("pay_uncertain").retry_payment, false);
+  assert.equal(nextForAssessment(null, { wallReason: "needs_login" }).retry_payment, false);
+  assert.equal(nextForAssessment(null, { wallReason: "needs_bot" }).action, "stop_auth_required");
+  assert.equal(nextFromError("TwzrdChallengeChangedError").action, "reassess");
+  assert.equal(nextFromError("TwzrdPolicyAbortError").action, "escalate");
 });
 
-test("possible settlement never recommends paying again", () => {
-  const r = recovery(sfe("origin", "pay_uncertain"));
-  assert.equal(r.settlement, "uncertain");
-  assert.equal(r.paid, "maybe");
-  assert.equal(r.next, NEXT.RECONCILE_SETTLEMENT);
-  assert.ok(r.unknown.includes("settlement_state"));
-  assert.notEqual(r.next, NEXT.WAIT_AND_RETRY);
+test("stale assessment asks for refresh, not another payment", () => {
+  const a = buildAssessment({
+    bind, wallets: allowWallet, endpoint: { method_hold: "hold" },
+    action: "proceed", reasons: ["wallet_no_block"], cap: null,
+    now: Date.now() - PREFLIGHT_TTL_MS - 1,
+  });
+  const n = nextForAssessment(a, { now: Date.now() });
+  assert.equal(n.action, "refresh_assessment");
+  assert.equal(n.retry_payment, false);
 });
 
-test("authority-shaped stops are marked, not retried", () => {
-  for (const [o, reason] of [
-    [sfe("policy", "TwzrdPolicyAbortError"), "refused_by_assessment"],
-    [{ res: { status: 422, ok: false }, body: { reason: "needs_login" } }, "login_wall"],
-  ]) {
-    const r = recovery(o);
-    assert.equal(r.reason, reason);
-    assert.equal(r.needs_authority, true);
-    assert.equal(r.retry_same_terms, false);
-  }
-  // a bot gate is not an authority problem: a password would not help
-  const bot = recovery({ res: { status: 422, ok: false }, body: { reason: "needs_bot" } });
-  assert.equal(bot.needs_authority, false);
-  assert.equal(bot.next, NEXT.STOP_ATTEMPT);
+test("challengeChanged and policyAbort carry next on the error", () => {
+  const a = buildAssessment({
+    bind, wallets: allowWallet, endpoint: { method_hold: "hold" },
+    action: "proceed", reasons: ["wallet_no_block"],
+  });
+  const ch = challengeChanged(a, { payTo: "other" });
+  assert.equal(ch.next.action, "reassess");
+  assert.equal(ch.next.retry_payment, false);
+  const refused = buildAssessment({
+    bind, wallets: [{ seller: rail.payTo, decision: "block", cap: null }],
+    endpoint: { method_hold: "hold" }, action: "refuse", reasons: ["wallet_block"],
+  });
+  assert.equal(refused.next.action, "escalate");
+  const pe = policyAbort(refused);
+  assert.equal(pe.next.action, "escalate");
+  assert.equal(pe.next.human, "missing_authority");
 });
 
-test("a 200 is never reported as delivered", () => {
-  const r = recovery({ res: { status: 200, ok: true }, body: {} });
-  assert.equal(r.reason, "returned_delivery_unverified");
-  assert.equal(r.next, NEXT.VERIFY_DELIVERY);
-  assert.ok(r.unknown.includes("delivery"));
+test("beforePayment aborts on changed terms, stale, or refuse; never mutates", () => {
+  const a = buildAssessment({
+    bind, wallets: allowWallet, endpoint: { method_hold: "hold" },
+    action: "proceed", reasons: ["wallet_no_block"],
+  });
+  assert.equal(beforePayment(rail, a), undefined);
+  const drift = beforePayment({ ...rail, maxAmountRequired: "60000" }, a);
+  assert.equal(drift.abort, true);
+  assert.equal(drift.next.action, "reassess");
+  assert.equal(drift.next.retry_payment, false);
+  const stale = beforePayment(rail, a, { now: a.observed.at + PREFLIGHT_TTL_MS + 1 });
+  assert.equal(stale.abort, true);
+  assert.equal(stale.next.action, "refresh_assessment");
+  const blocked = buildAssessment({
+    bind, wallets: [{ seller: rail.payTo, decision: "block", cap: null }],
+    endpoint: { method_hold: "hold" }, action: "refuse", reasons: ["wallet_block"],
+  });
+  const esc = beforePayment(rail, blocked);
+  assert.equal(esc.abort, true);
+  assert.equal(esc.next.action, "escalate");
 });
 
-test("stale evidence turns a retry into a refresh", () => {
-  const now = Date.now();
-  const old = fresh(now - EVIDENCE_TTL_MS - 1000);
-  const r = recovery(sfe("origin", "cooldown"), { assessment: old, now });
-  assert.equal(r.evidence_stale, true);
-  assert.equal(r.next, NEXT.REFRESH_EVIDENCE);
-  const ok = recovery(sfe("origin", "cooldown"), { assessment: fresh(now), now });
-  assert.equal(ok.evidence_stale, false);
-  assert.equal(ok.next, NEXT.WAIT_AND_RETRY);
-  assert.equal(ok.retry_same_terms, true);
+test("wall 422 is stop; failed output check is record_failed_delivery; HTTP 200 is not proof", () => {
+  const wall = checkBrowseExpectation({ ok: false, reason: "needs_login" });
+  assert.equal(wall.next.action, "stop_auth_required");
+  assert.equal(wall.next.retry_payment, false);
+  const bot = checkBrowseExpectation({ ok: false, reason: "needs_bot" });
+  assert.equal(bot.next.action, "stop_auth_required");
+  const thin = checkBrowseExpectation({ ok: true, word_count: 2 });
+  assert.equal(thin.next.action, "record_failed_delivery");
+  assert.equal(thin.next.retry_payment, "only_if_mandate_allows");
+  const a = buildAssessment({
+    bind, wallets: allowWallet, endpoint: { method_hold: "hold" },
+    action: "proceed", reasons: ["wallet_no_block"],
+  });
+  const after = applyDeliveryCheck(a, { ok: true, word_count: 2 });
+  assert.equal(after.delivered.met, false);
+  assert.equal(after.observed.delivery_proof, "unverified");
+  assert.equal(JSON.stringify(after.decided), JSON.stringify(a.decided));
+  const ok = checkBrowseExpectation({ ok: true, word_count: 50 });
+  assert.equal(ok.met, true);
+  assert.equal(ok.next.action, "proceed");
 });
 
-test("an exhausted mandate withdraws permission to spend again", () => {
-  const spent = recovery(sfe("policy", "TwzrdChallengeChangedError"), { mandate: { remaining_usdc: 0, per_call_cap_usdc: 0.05 } });
-  assert.equal(spent.next, NEXT.DO_NOT_PAY);
-  assert.equal(spent.needs_authority, true);
-  const left = recovery(sfe("policy", "TwzrdChallengeChangedError"), { mandate: { remaining_usdc: 1.5 } });
-  assert.equal(left.next, NEXT.REASSESS);
-  assert.equal(left.allowance.remaining_usdc, 1.5);
-  // no mandate supplied is an explicit unknown, not an assumed allowance
-  assert.ok(recovery(sfe("origin", "cooldown")).unknown.includes("mandate_not_supplied"));
-});
-
-test("an unclassified failure says so instead of guessing a next step", () => {
-  const r = recovery(Object.assign(new Error("weird"), { name: "SomethingElse" }));
-  assert.equal(r.reason, "unclassified");
-  assert.ok(r.unknown.includes("failure_class"));
-  assert.equal(r.next, NEXT.ABORT);
+test("gate402 refuse still unpaid and next is escalate", async () => {
+  const seen = [];
+  const invoice = new Response(JSON.stringify({ x402Version: 1, accepts: [rail] }), { status: 402 });
+  await assert.rejects(
+    () => gate402(invoice, seen, async (seller) => ({ seller, decision: "block", cap: null }), { skipHead: true, url: bind.url, method: "GET" }),
+    (e) => e.name === "TwzrdPolicyAbortError" && e.next.action === "escalate" && e.next.retry_payment === false,
+  );
 });
