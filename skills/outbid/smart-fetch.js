@@ -284,6 +284,11 @@ export function checkBrowseExpectation(body, { minWords = 10 } = {}) {
   if (WALL_REASONS.has(reason)) {
     return { met: false, kind: "wall", reason, next: nextFor("stop_auth_required") };
   }
+  // A reason we do not recognise is not a delivery failure we may retry under
+  // the mandate -- we do not know what it means. Same rule as tagWall.
+  if (typeof reason === "string" && reason) {
+    return { met: false, kind: "wall", reason, next: nextFor("stop_unclassified") };
+  }
   const words = Number(body?.word_count);
   if (body?.ok === true && Number.isFinite(words) && words >= minWords) {
     return { met: true, kind: "output", word_count: words, next: nextFor("proceed") };

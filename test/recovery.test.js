@@ -135,3 +135,17 @@ test("needs_browser is self-recoverable, not a human interruption", async () => 
   assert.equal(nextForAssessment(null, { wallReason: "needs_captcha" }).action, "stop_unclassified");
   assert.equal(nextFromError("x", { wallReason: "needs_captcha" }).action, "stop_unclassified");
 });
+
+test("an unrecognised 422 reason never buys a retry through the delivery check", async () => {
+  const { checkBrowseExpectation, nextForAssessment } = await import("../skills/outbid/smart-fetch.js");
+  for (const r of ["needs_captcha", "needs_something_new", "geo_blocked"]) {
+    const viaCheck = checkBrowseExpectation({ reason: r }).next;
+    const viaAssessment = nextForAssessment(null, { wallReason: r });
+    assert.equal(viaCheck.action, "stop_unclassified", `${r} via delivery check`);
+    assert.equal(viaCheck.action, viaAssessment.action, `${r}: both paths must agree`);
+    assert.notEqual(viaCheck.retry_payment, "only_if_mandate_allows");
+  }
+  // a genuine short body is still a delivery failure, retryable under the mandate
+  assert.equal(checkBrowseExpectation({ ok: true, word_count: 2 }).next.action, "record_failed_delivery");
+  assert.equal(checkBrowseExpectation({ ok: true, word_count: 500 }).next.action, "proceed");
+});
