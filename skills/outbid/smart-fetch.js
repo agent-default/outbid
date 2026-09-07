@@ -87,7 +87,11 @@ export function assessmentCoversAccepted(assessment, accepted) {
     r.payTo === accepted.payTo
     && r.network === accepted.network
     && r.amount === accepted.amount
-    && (!accepted.asset || !r.asset || r.asset === accepted.asset)
+    // Fail closed on asset: an assessed rail names an asset, so a payment that
+    // omits the field is not covered by it. Treating a missing asset as a match
+    // let a payment drop the field and slip a bound term.
+    && (r.asset ? r.asset === accepted.asset : true)
+    && r.scheme === accepted.scheme
   ));
 }
 

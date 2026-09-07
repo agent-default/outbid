@@ -158,3 +158,18 @@ test("payment accepted on a rail not in the assessment is unauthorized", () => {
   })).toString("base64");
   assert.equal(assessmentCoversAccepted(assessment, acceptedFromPayment(other)), false);
 });
+
+test("a payment cannot drop a bound term to escape the assessment", async () => {
+  const { challengeBind, buildAssessment, assessmentCoversAccepted, acceptedFromPayment } =
+    await import("../skills/outbid/smart-fetch.js");
+  const rail = { scheme: "exact", network: "solana", asset: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", maxAmountRequired: "50000", payTo: "F1AbWuXJcBT9arW9wc6Xr2vom5NBtngWsz6Ht16jRBLM" };
+  const A = buildAssessment({ bind: challengeBind("https://x.test/r", "GET", [rail]), wallets: [], endpoint: { method_hold: "hold" }, action: "proceed", reasons: [] });
+  const pay = (o) => Buffer.from(JSON.stringify({ x402Version: 2, accepted: { scheme: "exact", network: "solana", asset: rail.asset, amount: "50000", payTo: rail.payTo, ...o } })).toString("base64");
+  const covers = (o) => assessmentCoversAccepted(A, acceptedFromPayment(pay(o)));
+  assert.equal(covers({}), true, "the assessed terms are authorised");
+  assert.equal(covers({ asset: undefined }), false, "an omitted asset is not a wildcard");
+  assert.equal(covers({ asset: "So11111111111111111111111111111111111111112" }), false, "a swapped asset is refused");
+  assert.equal(covers({ scheme: "upto" }), false, "scheme is a bound term");
+  assert.equal(covers({ amount: "5000000" }), false);
+  assert.equal(covers({ network: "base" }), false);
+});
