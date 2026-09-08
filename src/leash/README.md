@@ -36,7 +36,7 @@ the money path. `asset` is the 402's asset; TWZRD is refused outright.
 | 3 | `lock_time <= now < lock_time + window_h*3600` | chain |
 | 4 | `unbond_ts == 0` | chain |
 | 2 | agent ∈ roster, `roster.length <= grant.wallets` | operator `FileRoster` / `StaticRoster` |
-| 5 | `spent_in_window + amount <= cap_usd` | client journal |
+| 5 | `spent + reserved + amount <= cap_usd` | client journal (holds persist) |
 
 Numbering follows `capacity.md`. **Steps 6 and 7 are not implemented here:**
 intel wash preflight (6) lives in another tree, and signer-invocation
@@ -62,8 +62,32 @@ and is shared by every agent under it; the per-agent split is kept for audit.
 Records are idempotent on the settle signature, so a replay is not counted
 twice. `FileJournal` writes `0600` via tmp+rename.
 
-The journal is per-client state. Two clients running the same locker with
-separate journals will each spend the full cap. One locker, one journal.
+`beforePayment` **reserves** the amount in the journal until `afterSettle`
+(`commit`) or `release` / TTL (default 120s). Two in-flight approvals cannot
+jointly exceed the cap. Holds live in the journal file, so a restarted
+process on the same file still sees them. `FileJournal` takes an exclusive
+create lock around each read-modify-write so two OS processes cannot both
+clear a joint over-cap. Two *different* journal files on the same locker can
+still each spend the full cap. One locker, one journal.
+
+## Reservations
+
+An approval holds its amount against the cap until it settles. Without that,
+two payments approved between the same journal read and write both clear a cap
+they jointly exceed. `beforePayment` counts `spent + in-flight + this payment`,
+and a denial reports `inFlight` alongside `spent`. Holds are journal state,
+not an in-process Map.
+
+A reservation ends three ways: `afterSettle` converts it to tally,
+`release(decision)` hands it back (a failed signature or broadcast — `wrapSigner`
+does this for you), or it expires after `reservationTtl` seconds (default 120)
+so an abandoned attempt cannot strand the cap. `pending(locker, windowStart)`
+reports what is currently held.
+
+**In-process only.** Reservations live in the `createLeash` closure, not in the
+journal. A second process against the same journal file still races, and so
+does a second `createLeash` in the same process. One locker, one leash, one
+process — the same constraint as the journal itself.
 
 ## Tier table drift
 

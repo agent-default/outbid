@@ -17,6 +17,12 @@ function requireLeash(leash) {
   }
 }
 
+// An approval holds cap until it settles. Anything that ends the attempt
+// early must hand it back rather than wait for the reservation to expire.
+function release(leash, decision) {
+  if (typeof leash.release === "function") leash.release(decision);
+}
+
 function requireInner(inner) {
   if (!inner || typeof inner.signTransaction !== "function") {
     throw new Error("wrapSigner: signer.signTransaction is required");
@@ -41,7 +47,13 @@ export function wrapSigner(inner, leash, { locker, agent } = {}) {
     if (!decision.ok) {
       throw new LeashDenied(decision);
     }
-    const signed = await inner.signTransaction(transaction);
+    let signed;
+    try {
+      signed = await inner.signTransaction(transaction);
+    } catch (error) {
+      release(leash, decision);
+      throw error;
+    }
     return { signed, decision };
   }
 
@@ -52,9 +64,16 @@ export function wrapSigner(inner, leash, { locker, agent } = {}) {
   async function sendPayment({ amount, asset, transaction, network }) {
     const { signed, decision } = await signPayment({ amount, asset, transaction });
     if (typeof inner.sendTransaction !== "function") {
+      release(leash, decision);
       throw new Error("wrapSigner: signer.sendTransaction is required for sendPayment");
     }
-    const id = await inner.sendTransaction(signed, network);
+    let id;
+    try {
+      id = await inner.sendTransaction(signed, network);
+    } catch (error) {
+      release(leash, decision);
+      throw error;
+    }
     confirm(decision, id);
     return { signed, decision, id };
   }
@@ -64,6 +83,7 @@ export function wrapSigner(inner, leash, { locker, agent } = {}) {
     locker,
     signPayment,
     confirm,
+    release: (decision) => release(leash, decision),
     sendPayment,
   };
 }

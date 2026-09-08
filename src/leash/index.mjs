@@ -1,5 +1,6 @@
 // Refuse-before-sign. The vault records; this decides. Never signs, never
 // settles, never puts TWZRD in a 402 asset. graph/nodes/capacity.md.
+import crypto from "node:crypto";
 import { MINT, readLock, windowEnd } from "./lock.mjs";
 import { FileJournal, MemoryJournal } from "./journal.mjs";
 import { FileRoster, StaticRoster } from "./roster.mjs";
@@ -20,13 +21,31 @@ function rosterFn(roster) {
   throw new Error("leash: roster is required");
 }
 
-export function createLeash({ rpc, journal, roster, now = () => Math.floor(Date.now() / 1000), programId }) {
+function micro(v) {
+  return `$${(Number(v) / 1e6).toFixed(2)}`;
+}
+
+// Seconds. Journal stores until as unix ms. One locker, one journal.
+export const RESERVATION_TTL = 120;
+
+export function createLeash({
+  rpc, journal, roster,
+  now = () => Math.floor(Date.now() / 1000),
+  programId,
+  reservationTtl = RESERVATION_TTL,
+}) {
   if (typeof rpc !== "function") throw new Error("leash: rpc is required");
   if (!journal) throw new Error("leash: journal is required");
   const membersOf = rosterFn(roster);
 
-  // Every failure path returns a denial. There is no path that signs on
-  // missing evidence: RPC down, absent lock, or unreadable tally → refuse.
+  function nowMs() {
+    return now() * 1000;
+  }
+
+  function pending(locker, windowStart) {
+    return journal.reserved(locker, windowStart, nowMs());
+  }
+
   async function beforePayment({ locker, agent, amount, asset }) {
     if (typeof amount !== "bigint" || amount <= 0n) {
       return deny("bad_amount", "amount must be a positive BigInt of atomic USDC");
@@ -71,34 +90,52 @@ export function createLeash({ rpc, journal, roster, now = () => Math.floor(Date.
     }
 
     const cap = grant.capUsd * 1_000_000n;
-    let spent;
+    let spent = 0n;
+    let inFlight = 0n;
+    let reservation;
     try {
       spent = journal.spent(locker, start);
-    } catch (error) {
-      return deny("tally_unreadable", `tally unreadable: ${error.message}`);
-    }
-    if (spent + amount > cap) {
-      const micro = (v) => `$${(Number(v) / 1e6).toFixed(2)}`;
-      return deny("cap_exceeded", `${micro(spent + amount)} exceeds the ${micro(cap)} cap`, {
-        windowStart: start, windowEnd: end, spent, cap, remaining: cap > spent ? cap - spent : 0n,
+      inFlight = pending(locker, start);
+      reservation = journal.reserve({
+        locker, windowStart: start, agent, amount, cap,
+        ttlMs: reservationTtl * 1000, nowMs: nowMs(),
+        id: crypto.randomUUID(),
       });
+    } catch (error) {
+      if (error.code === "cap_exceeded") {
+        const committed = spent + inFlight;
+        const detail = inFlight > 0n ? ` (${micro(inFlight)} in flight)` : "";
+        return deny("cap_exceeded", `${micro(committed + amount)} exceeds the ${micro(cap)} cap${detail}`, {
+          windowStart: start, windowEnd: end, spent, inFlight, cap,
+          remaining: cap > committed ? cap - committed : 0n,
+        });
+      }
+      return deny("tally_unreadable", `tally unreadable: ${error.message}`);
     }
 
     return {
-      ok: true, locker, agent, amount,
+      ok: true, locker, agent, amount, reservation,
       windowStart: start, windowEnd: end,
-      grant, spent, cap, remaining: cap - spent - amount,
+      grant, spent, inFlight, cap, remaining: cap - inFlight - amount,
     };
   }
 
-  // Success only. `id` is the settle signature; replays are not double-counted.
   function afterSettle(decision, id) {
     if (!decision?.ok) throw new Error("afterSettle: decision was not an approval");
+    if (decision.reservation) {
+      return journal.commit(decision.reservation, id, { nowMs: nowMs() });
+    }
     return journal.record({
       locker: decision.locker, windowStart: decision.windowStart,
       agent: decision.agent, amount: decision.amount, id, at: now(),
     });
   }
 
-  return { beforePayment, afterSettle };
+  function release(decision) {
+    if (!decision?.ok) throw new Error("release: decision was not an approval");
+    if (!decision.reservation) return false;
+    return journal.release(decision.reservation, { nowMs: nowMs() });
+  }
+
+  return { beforePayment, afterSettle, release, pending };
 }

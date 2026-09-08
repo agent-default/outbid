@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  ATOMIC, FileJournal, MINT, MemoryJournal, PROGRAM_ID, STATE_LEN,
+  ATOMIC, wrapSigner, FileJournal, MINT, MemoryJournal, PROGRAM_ID, STATE_LEN,
   createLeash, decodeLockState, deriveLockPda, grantFromLock,
 } from "../src/leash/index.mjs";
 
@@ -227,4 +227,158 @@ test("the preflight example runs and refuses more than it signs", () => {
     assert.match(demo.stdout, new RegExp(code), `example must demonstrate ${code}`);
   }
   assert.match(demo.stdout, /signed 6 payments, refused 8\./);
+});
+
+// --- reservations: the gap between beforePayment and afterSettle ------------
+
+test("concurrent approvals cannot jointly exceed the cap", async () => {
+  const leash = leashFor(state({}));
+  const pay = () => leash.beforePayment({
+    locker: LOCKER, agent: AGENT, amount: 60_000_000n, asset: USDC,
+  });
+  // Both are decided before either settles. Without reservations both clear.
+  const [first, second] = await Promise.all([pay(), pay()]);
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, false, "the second in-flight approval must not clear the cap");
+  assert.equal(second.code, "cap_exceeded");
+  assert.equal(second.inFlight, 60_000_000n);
+  assert.match(second.reason, /in flight/);
+  assert.equal(leash.pending(LOCKER, 1_000), 60_000_000n);
+});
+
+test("a settled payment converts its reservation into tally, not double-count", async () => {
+  const journal = new MemoryJournal();
+  const leash = leashFor(state({}), { journal });
+  const decision = await leash.beforePayment({
+    locker: LOCKER, agent: AGENT, amount: 40_000_000n, asset: USDC,
+  });
+  assert.equal(leash.pending(LOCKER, 1_000), 40_000_000n);
+  leash.afterSettle(decision, "sig1");
+  assert.equal(leash.pending(LOCKER, 1_000), 0n, "settling frees the reservation");
+  assert.equal(journal.spent(LOCKER, 1_000), 40_000_000n);
+  const next = await leash.beforePayment({
+    locker: LOCKER, agent: AGENT, amount: 60_000_000n, asset: USDC,
+  });
+  assert.equal(next.ok, true, "the settled amount is counted once, not twice");
+  assert.equal(next.spent, 40_000_000n);
+  assert.equal(next.inFlight, 0n);
+});
+
+test("release frees cap for an approval that will never settle", async () => {
+  const leash = leashFor(state({}));
+  const decision = await leash.beforePayment({
+    locker: LOCKER, agent: AGENT, amount: 100_000_000n, asset: USDC,
+  });
+  assert.equal((await leash.beforePayment({
+    locker: LOCKER, agent: AGENT, amount: 1n, asset: USDC,
+  })).code, "cap_exceeded");
+  assert.equal(leash.release(decision), true);
+  assert.equal(leash.pending(LOCKER, 1_000), 0n);
+  assert.equal((await leash.beforePayment({
+    locker: LOCKER, agent: AGENT, amount: 100_000_000n, asset: USDC,
+  })).ok, true);
+  assert.equal(leash.release(decision), false, "releasing twice is not an error but frees nothing");
+  assert.throws(() => leash.release({ ok: false }), /not an approval/);
+});
+
+test("an abandoned reservation expires instead of holding cap forever", async () => {
+  let clock = 1_100;
+  const leash = leashFor(state({}), { now: () => clock });
+  await leash.beforePayment({ locker: LOCKER, agent: AGENT, amount: 100_000_000n, asset: USDC });
+  clock += 119;
+  assert.equal((await leash.beforePayment({
+    locker: LOCKER, agent: AGENT, amount: 1n, asset: USDC,
+  })).code, "cap_exceeded", "still held before the TTL");
+  clock += 1;
+  assert.equal(leash.pending(LOCKER, 1_000), 0n);
+  assert.equal((await leash.beforePayment({
+    locker: LOCKER, agent: AGENT, amount: 100_000_000n, asset: USDC,
+  })).ok, true, "an abandoned attempt does not strand the cap");
+});
+
+test("reservations are per window, not global", async () => {
+  const leash = leashFor(state({}));
+  await leash.beforePayment({ locker: LOCKER, agent: AGENT, amount: 100_000_000n, asset: USDC });
+  assert.equal(leash.pending(LOCKER, 1_000), 100_000_000n);
+  assert.equal(leash.pending(LOCKER, 500_000), 0n);
+  assert.equal(leash.pending(AGENT, 1_000), 0n);
+});
+
+test("a failed sign or broadcast hands the cap back immediately", async () => {
+  const leash = leashFor(state({}));
+  const inner = {
+    address: AGENT,
+    signTransaction: async (tx) => { if (tx === "bad-sign") throw new Error("key locked"); return `signed:${tx}`; },
+    sendTransaction: async () => { throw new Error("broadcast refused"); },
+  };
+  const wrapped = wrapSigner(inner, leash, { locker: LOCKER });
+  const pay = { amount: 100_000_000n, asset: USDC, transaction: "tx1" };
+
+  await assert.rejects(() => wrapped.sendPayment(pay), /broadcast refused/);
+  assert.equal(leash.pending(LOCKER, 1_000), 0n, "a failed broadcast must not hold the cap");
+  await assert.rejects(
+    () => wrapped.signPayment({ ...pay, transaction: "bad-sign" }), /key locked/,
+  );
+  assert.equal(leash.pending(LOCKER, 1_000), 0n, "a failed signature must not hold the cap");
+
+  // The cap is fully available again after both failures.
+  const { decision } = await wrapped.signPayment(pay);
+  assert.equal(decision.ok, true);
+  assert.equal(leash.pending(LOCKER, 1_000), 100_000_000n);
+  wrapped.release(decision);
+  assert.equal(leash.pending(LOCKER, 1_000), 0n);
+});
+
+test("FileJournal holds survive a new process on the same file", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "leash-hold-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "journal.json");
+  const first = leashFor(state({}), { journal: new FileJournal(file) });
+  const decision = await first.beforePayment({
+    locker: LOCKER, agent: AGENT, amount: 60_000_000n, asset: USDC,
+  });
+  assert.equal(decision.ok, true);
+  const second = leashFor(state({}), { journal: new FileJournal(file) });
+  const over = await second.beforePayment({
+    locker: LOCKER, agent: AGENT, amount: 60_000_000n, asset: USDC,
+  });
+  assert.equal(over.code, "cap_exceeded", "a restarted process must see the hold");
+  assert.equal(second.pending(LOCKER, 1_000), 60_000_000n);
+  second.release(decision);
+  assert.equal(second.pending(LOCKER, 1_000), 0n);
+});
+
+test("two OS processes cannot both reserve past the cap", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "leash-race-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "journal.json");
+  const script = path.join(dir, "race.mjs");
+  const journalUrl = new URL("../src/leash/journal.mjs", import.meta.url).href;
+  fs.writeFileSync(script, `
+    import { FileJournal } from ${JSON.stringify(journalUrl)};
+    const j = new FileJournal(${JSON.stringify(file)});
+    try {
+      j.reserve({
+        locker: ${JSON.stringify(LOCKER)},
+        windowStart: 1000,
+        agent: ${JSON.stringify(AGENT)},
+        amount: 60_000_000n,
+        cap: 100_000_000n,
+        ttlMs: 60_000,
+      });
+      process.stdout.write("ok");
+    } catch (e) {
+      process.stdout.write(e.code === "cap_exceeded" ? "cap" : ("err:" + e.message));
+    }
+  `);
+  const run = () => new Promise((resolve) => {
+    const child = spawn(process.execPath, [script]);
+    let out = "";
+    child.stdout.on("data", (chunk) => { out += chunk; });
+    child.stderr.on("data", (chunk) => { out += chunk; });
+    child.on("close", () => resolve(out.trim()));
+  });
+  const [a, b] = await Promise.all([run(), run()]);
+  const results = [a, b].sort();
+  assert.deepEqual(results, ["cap", "ok"], `race results: ${JSON.stringify([a, b])}`);
 });
