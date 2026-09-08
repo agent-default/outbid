@@ -6,6 +6,10 @@ import path from "node:path";
 
 const key = (locker, windowStart) => `${locker}|${windowStart}`;
 
+// Seconds. The only default. Direct reserve() and createLeash must match.
+export const RESERVATION_TTL = 120;
+export const RESERVATION_TTL_MS = RESERVATION_TTL * 1000;
+
 class BaseJournal {
   // Sum across every agent under this locker's window. The cap is the
   // locker's, not per agent; the agent split is kept for audit.
@@ -25,33 +29,67 @@ class BaseJournal {
     const entry = state[key(locker, windowStart)];
     if (!entry) return 0n;
     if (this._purge(entry, nowMs)) this._write(state);
-    return Object.values(entry.holds || {}).reduce((sum, h) => sum + BigInt(h.amount), 0n);
+    const held = Object.values(entry.holds || {}).reduce((sum, h) => sum + BigInt(h.amount), 0n);
+    const flying = Object.values(entry.inflight || {}).reduce((sum, h) => sum + BigInt(h.amount), 0n);
+    return held + flying;
   }
 
-  // Atomic vs spent+held. Throws { code: "cap_exceeded" } rather than
+  // Atomic vs spent+held+inflight. Throws { code: "cap_exceeded" } rather than
   // over-reserving. Two beforePayment calls cannot both clear a joint over-cap.
-  reserve({ locker, windowStart, agent, amount, cap, ttlMs = 60_000, nowMs = Date.now(), id }) {
+  reserve({ locker, windowStart, agent, amount, cap, ttlMs = RESERVATION_TTL_MS, nowMs = Date.now(), id }) {
     if (typeof amount !== "bigint" || amount <= 0n) {
       throw new Error("journal: amount must be a positive BigInt");
     }
     if (typeof cap !== "bigint") throw new Error("journal: cap is required");
     const state = this._read();
     const k = key(locker, windowStart);
-    const entry = (state[k] ??= { agents: {}, ids: {}, holds: {} });
+    const entry = (state[k] ??= { agents: {}, ids: {}, holds: {}, inflight: {} });
     entry.holds ??= {};
+    entry.inflight ??= {};
     this._purge(entry, nowMs);
     const spent = Object.values(entry.agents).reduce((sum, v) => sum + BigInt(v), 0n);
     const held = Object.values(entry.holds).reduce((sum, h) => sum + BigInt(h.amount), 0n);
-    if (spent + held + amount > cap) {
+    const flying = Object.values(entry.inflight).reduce((sum, h) => sum + BigInt(h.amount), 0n);
+    if (spent + held + flying + amount > cap) {
       const err = new Error("journal: reservation would exceed cap");
       err.code = "cap_exceeded";
       throw err;
     }
     const rid = id ?? `r-${nowMs.toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    if (entry.holds[rid]) throw new Error("journal: reservation id already held");
+    if (entry.holds[rid] || entry.inflight[rid]) {
+      throw new Error("journal: reservation id already held");
+    }
     entry.holds[rid] = { agent, amount: amount.toString(), until: nowMs + ttlMs };
     this._write(state);
     return rid;
+  }
+
+  // Signed and broadcast. Never TTL-purged. Counts against the cap until commit.
+  inflight(reservationId, txHash, { nowMs = Date.now() } = {}) {
+    if (typeof reservationId !== "string" || !reservationId) {
+      throw new Error("journal: reservation id is required");
+    }
+    if (typeof txHash !== "string" || !txHash) throw new Error("journal: id is required");
+    const state = this._read();
+    for (const entry of Object.values(state)) {
+      entry.holds ??= {};
+      entry.inflight ??= {};
+      this._purge(entry, nowMs);
+      const flying = entry.inflight[reservationId];
+      if (flying) {
+        if (flying.tx !== txHash) throw new Error("journal: inflight tx mismatch");
+        return true;
+      }
+      const hold = entry.holds[reservationId];
+      if (!hold) continue;
+      entry.inflight[reservationId] = {
+        agent: hold.agent, amount: hold.amount, tx: txHash,
+      };
+      delete entry.holds[reservationId];
+      this._write(state);
+      return true;
+    }
+    return false;
   }
 
   commit(reservationId, txHash, { nowMs = Date.now() } = {}) {
@@ -62,17 +100,21 @@ class BaseJournal {
     const state = this._read();
     for (const [k, entry] of Object.entries(state)) {
       entry.holds ??= {};
+      entry.inflight ??= {};
       this._purge(entry, nowMs);
+      const flying = entry.inflight[reservationId];
       const hold = entry.holds[reservationId];
-      if (!hold) continue;
+      const row = flying || hold;
+      if (!row) continue;
       const [locker, windowStart] = k.split("|");
-      delete entry.holds[reservationId];
+      if (flying) delete entry.inflight[reservationId];
+      if (hold) delete entry.holds[reservationId];
       this._write(state);
       return this.record({
         locker,
         windowStart: Number(windowStart),
-        agent: hold.agent,
-        amount: BigInt(hold.amount),
+        agent: row.agent,
+        amount: BigInt(row.amount),
         id: txHash,
         at: Math.floor(nowMs / 1000),
       });
@@ -116,7 +158,7 @@ class BaseJournal {
     }
     const state = this._read();
     const k = key(locker, windowStart);
-    const entry = (state[k] ??= { agents: {}, ids: {}, holds: {} });
+    const entry = (state[k] ??= { agents: {}, ids: {}, holds: {}, inflight: {} });
     if (entry.ids[id] !== undefined) return false;
     entry.ids[id] = { agent, amount: amount.toString(), at: at ?? Math.floor(Date.now() / 1000) };
     entry.agents[agent] = (BigInt(entry.agents[agent] ?? 0n) + amount).toString();
@@ -183,6 +225,10 @@ export class FileJournal extends BaseJournal {
 
   reserve(args) {
     return this._withLock(() => super.reserve(args));
+  }
+
+  inflight(reservationId, txHash, opts) {
+    return this._withLock(() => super.inflight(reservationId, txHash, opts));
   }
 
   commit(reservationId, txHash, opts) {

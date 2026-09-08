@@ -63,12 +63,12 @@ Records are idempotent on the settle signature, so a replay is not counted
 twice. `FileJournal` writes `0600` via tmp+rename.
 
 `beforePayment` **reserves** the amount in the journal until `afterSettle`
-(`commit`) or `release` / TTL (default 120s). Two in-flight approvals cannot
-jointly exceed the cap. Holds live in the journal file, so a restarted
-process on the same file still sees them. `FileJournal` takes an exclusive
-create lock around each read-modify-write so two OS processes cannot both
-clear a joint over-cap. Two *different* journal files on the same locker can
-still each spend the full cap. One locker, one journal.
+(`commit`) or `release` / hold TTL. `RESERVATION_TTL` is **120s** for both
+`createLeash` and `journal.reserve()` — one definition in `journal.mjs`.
+Unsigned holds expire. **Inflight** (signed, broadcast, settle unknown)
+never self-releases; only `commit` ends it. `release` drops holds only.
+Two in-flight approvals cannot jointly exceed the cap. Holds and inflight
+live in the journal file. One locker, one journal.
 
 ## Reservations
 

@@ -2,11 +2,11 @@
 // settles, never puts TWZRD in a 402 asset. graph/nodes/capacity.md.
 import crypto from "node:crypto";
 import { MINT, readLock, windowEnd } from "./lock.mjs";
-import { FileJournal, MemoryJournal } from "./journal.mjs";
+import { FileJournal, MemoryJournal, RESERVATION_TTL } from "./journal.mjs";
 import { FileRoster, StaticRoster } from "./roster.mjs";
 import { LeashDenied, wrapSigner } from "./signer.mjs";
 
-export { FileJournal, MemoryJournal, FileRoster, StaticRoster, LeashDenied, wrapSigner };
+export { FileJournal, MemoryJournal, FileRoster, StaticRoster, LeashDenied, wrapSigner, RESERVATION_TTL };
 export * from "./lock.mjs";
 
 const deny = (code, reason, extra = {}) => ({ ok: false, code, reason, ...extra });
@@ -24,9 +24,6 @@ function rosterFn(roster) {
 function micro(v) {
   return `$${(Number(v) / 1e6).toFixed(2)}`;
 }
-
-// Seconds. Journal stores until as unix ms. One locker, one journal.
-export const RESERVATION_TTL = 120;
 
 export function createLeash({
   rpc, journal, roster,
@@ -120,9 +117,16 @@ export function createLeash({
     };
   }
 
+  function markInflight(decision, id) {
+    if (!decision?.ok) throw new Error("inflight: decision was not an approval");
+    if (!decision.reservation) return false;
+    return journal.inflight(decision.reservation, id, { nowMs: nowMs() });
+  }
+
   function afterSettle(decision, id) {
     if (!decision?.ok) throw new Error("afterSettle: decision was not an approval");
     if (decision.reservation) {
+      journal.inflight(decision.reservation, id, { nowMs: nowMs() });
       return journal.commit(decision.reservation, id, { nowMs: nowMs() });
     }
     return journal.record({
@@ -137,5 +141,5 @@ export function createLeash({
     return journal.release(decision.reservation, { nowMs: nowMs() });
   }
 
-  return { beforePayment, afterSettle, release, pending };
+  return { beforePayment, afterSettle, inflight: markInflight, release, pending };
 }

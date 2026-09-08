@@ -5,9 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  ATOMIC, wrapSigner, FileJournal, MINT, MemoryJournal, PROGRAM_ID, STATE_LEN,
-  createLeash, decodeLockState, deriveLockPda, grantFromLock,
+  ATOMIC, wrapSigner, FileJournal, MINT, MemoryJournal, PROGRAM_ID, RESERVATION_TTL,
+  STATE_LEN, createLeash, decodeLockState, deriveLockPda, grantFromLock,
 } from "../src/leash/index.mjs";
+import { RESERVATION_TTL as JOURNAL_TTL, RESERVATION_TTL_MS } from "../src/leash/journal.mjs";
 
 const LOCKER = "8otvwgJ28HyQNc7mBSxtt4DWeqU1BwmQQLkFmhHE6yZP";
 const AGENT = "BmAqWFJDzbaL6cuE5rC8BB4YJkTwFoH1cYTvLovz1f4w";
@@ -381,4 +382,37 @@ test("two OS processes cannot both reserve past the cap", async (t) => {
   const [a, b] = await Promise.all([run(), run()]);
   const results = [a, b].sort();
   assert.deepEqual(results, ["cap", "ok"], `race results: ${JSON.stringify([a, b])}`);
+});
+
+test("pack: journal.reserve default TTL equals createLeash default", () => {
+  assert.equal(RESERVATION_TTL, JOURNAL_TTL);
+  assert.equal(RESERVATION_TTL_MS, RESERVATION_TTL * 1000);
+  const journal = new MemoryJournal();
+  const now = 1_000_000;
+  journal.reserve({
+    locker: LOCKER, windowStart: 1_000, agent: AGENT,
+    amount: 1n, cap: 10n, nowMs: now,
+  });
+  assert.equal(journal.reserved(LOCKER, 1_000, now + 60_000 + 1), 1n,
+    "direct reserve() must still hold after 60s — default is 120s, not 60s");
+  assert.equal(journal.reserved(LOCKER, 1_000, now + RESERVATION_TTL_MS + 1), 0n);
+});
+
+test("inflight survives hold TTL and still counts against the cap", () => {
+  const journal = new MemoryJournal();
+  const now = 1_000_000;
+  const rid = journal.reserve({
+    locker: LOCKER, windowStart: 1_000, agent: AGENT,
+    amount: 7n, cap: 10n, nowMs: now, ttlMs: 1,
+  });
+  assert.equal(journal.inflight(rid, "sig-in-flight", { nowMs: now }), true);
+  assert.equal(journal.release(rid, { nowMs: now + 10 }), false, "release must not drop inflight");
+  assert.equal(journal.reserved(LOCKER, 1_000, now + 10_000), 7n, "inflight never self-releases");
+  assert.throws(() => journal.reserve({
+    locker: LOCKER, windowStart: 1_000, agent: AGENT,
+    amount: 4n, cap: 10n, nowMs: now + 10_000,
+  }), (e) => e.code === "cap_exceeded");
+  assert.equal(journal.commit(rid, "sig-in-flight", { nowMs: now + 10_000 }), true);
+  assert.equal(journal.spent(LOCKER, 1_000), 7n);
+  assert.equal(journal.reserved(LOCKER, 1_000, now + 10_000), 0n);
 });

@@ -74,6 +74,9 @@ export function wrapSigner(inner, leash, { locker, agent } = {}) {
       release(leash, decision);
       throw error;
     }
+    if (typeof leash.inflight === "function") {
+      leash.inflight(decision, id);
+    }
     confirm(decision, id);
     return { signed, decision, id };
   }
