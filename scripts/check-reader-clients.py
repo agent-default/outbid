@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""LIVE PRODUCTION smoke test: 20 unpaid requests to reader.outbid.sh.
+"""LIVE PRODUCTION smoke test: 60 unpaid GETs to reader.outbid.sh/outbid.sh.
 
 Run manually or as a bounded deployment check, never in a tight loop.
 Only User-Agent varies; every request uses urllib's HTTP/TLS stack.
 This does not test real requests/httpx clients or their TLS fingerprints.
-Exit nonzero unless each UA gets the expected USDC 402 terms.
+Exit nonzero unless paid routes return USDC 402 terms and free routes are 200.
+Board GET /bid advertises payment; this never submits a paid POST /bid.
 """
 
+import argparse
 import json
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener
@@ -18,26 +20,29 @@ CLIENTS = [
 ]
 # Prices are pinned in atomic USDC; update with any deliberate price change.
 ENDPOINTS = {"scrape": 5000, "browse": 50000}
+BOARD_PATHS = {"llms.txt": None, "top": None, "route": 10000, "bid": 10000}
 USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"
 
 
-def probe(endpoint, amount, user_agent):
+def probe(url, amount, user_agent):
     opener = build_opener()
     opener.addheaders = []
     headers = {"Accept": "application/json"}
     if user_agent is not None:
         headers["User-Agent"] = user_agent
-    request = Request(
-        f"https://reader.outbid.sh/{endpoint}?url=https%3A%2F%2Fexample.com",
-        headers=headers,
-    )
+    request = Request(url, headers=headers)
     try:
         response = opener.open(request, timeout=15)
     except HTTPError as error:
         response = error
     with response:
-        if response.status != 402:
-            raise ValueError(f"expected 402, got {response.status}")
+        expected = 200 if amount is None else 402
+        if response.status != expected:
+            raise ValueError(f"expected {expected}, got {response.status}")
+        if amount is None:
+            if not response.read().strip():
+                raise ValueError("empty discovery response")
+            return
         body = json.load(response)
     for terms in body.get("accepts", []):
         network = terms.get("network")
@@ -52,10 +57,19 @@ def probe(endpoint, amount, user_agent):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--surface", choices=["all", "reader", "board"], default="all")
+    args = parser.parse_args()
+    endpoints = []
+    if args.surface in ("all", "reader"):
+        endpoints.extend((f"https://reader.outbid.sh/{name}?url=https%3A%2F%2Fexample.com", amount)
+                         for name, amount in ENDPOINTS.items())
+    if args.surface in ("all", "board"):
+        endpoints.extend((f"https://outbid.sh/{name}", amount) for name, amount in BOARD_PATHS.items())
     failed = 0
-    for endpoint, amount in ENDPOINTS.items():
+    for endpoint, amount in endpoints:
         for user_agent in CLIENTS:
-            label = f"/{endpoint} {user_agent or '(no UA)'}"
+            label = f"{endpoint} {user_agent or '(no UA)'}"
             try:
                 probe(endpoint, amount, user_agent)
                 print(f"PASS {label}")
