@@ -1,0 +1,263 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TWZRD Agent Intel",
+    "version": "0.5.9",
+    "summary": "Pre-spend trust for AI agents on Solana x402: free allow|warn|block ReadinessCard, paid V6 receipts; opt-in settle-rail attach.",
+    "description": "Pre-spend trust layer for AI agents paying over x402 on Solana. Free preflight emits allow | warn | block from observed settlement-graph shape (advisory \u2014 payment does not guarantee off-chain delivery). Resource discovery, paid renorm trust + V6 signed receipts, and optional gas-sponsored settlement when clients pin feePayer from GET /supported (GWRLgRB6diC2zG9BaoGJsan9T8JvJCk7usFruiefnfMP). Not a wallet or payment network. Path A: paid trust intel 402 \u2014 bind the accepts[] entry you pay. Settle rail: opt-in /supported feePayer. Path B = buyer AutoGate refuse (signer=0). Buyer gate package: twzrd-x402-gate@0.9.4.",
+    "contact": {
+      "name": "TWZRD",
+      "url": "https://twzrd.xyz",
+      "email": "support@twzrd.xyz"
+    },
+    "x-guidance": "TWZRD is pre-spend trust (horizontal); opt-in settle-rail is secondary \u2014 not a wallet or payment network. Free preflight: allow|warn|block (advisory). Path B = buyer AutoGate refuse (pre-sign); settle rail = /supported facilitator (not Path B). Recommended sequence: (1) GET /v1/intel/resources (SOT) + merchant_card + POST /v1/intel/preflight; (2) Path A optional paid GET /v1/intel/trust/{pubkey} (multi-rail 402); (3) settle-rail opt-in: GET /supported (feePayer GWRLgRB6diC2zG9BaoGJsan9T8JvJCk7usFruiefnfMP) then POST /verify + /settle for twzrd_receipt + merchant_attach; (4) POST /v1/receipts/verify. Install buyer gate: npm i twzrd-x402-gate@0.9.4. Payer leaderboard is secondary research, not the default buying path.",
+    "x-snapshot-of": "https://intel.twzrd.xyz/openapi.json",
+    "x-snapshot-taken": "2026-09-08"
+  },
+  "servers": [
+    {
+      "url": "https://intel.twzrd.xyz"
+    }
+  ],
+  "paths": {
+    "/v1/intel/quick/{pubkey}": {
+      "get": {
+        "operationId": "get_v1_intel_quick_pubkey",
+        "summary": "Fetch a quick seller risk score by pubkey",
+        "description": "Seller wash risk and wallet reputation for a Solana x402 merchant: wash label, fleet %, payer count, plus tier + score. Cheap $0.001 entry before a larger payment. No signed V6 receipt. x402-paid: 0.001 USDC (1000 base units) on Solana mainnet. Path A: bind to the accepts[] entry whose extra.feePayer you intend to pay; settle-rail settlement requires that feePayer to match GET /supported.",
+        "tags": [
+          "Paid Trust Intel (Path A)"
+        ],
+        "responses": {
+          "200": {
+            "description": "Paid response (JSON) including settlement tx.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "What the agent receives for the 0.001 USDC payment.",
+                  "properties": {
+                    "pubkey": {
+                      "type": "string"
+                    },
+                    "tier": {
+                      "type": "string",
+                      "description": "Bronze|Silver|Gold|Platinum."
+                    },
+                    "score": {
+                      "type": "number"
+                    },
+                    "wash_label": {
+                      "type": "string",
+                      "description": "Seller wash risk label (e.g. wash_shaped, organic)."
+                    },
+                    "fleet_pct": {
+                      "type": "number",
+                      "description": "Share of revenue from heavy-fleet payers."
+                    },
+                    "active_payers": {
+                      "type": "integer",
+                      "description": "Distinct observed payers in the corpus window."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required (x402). Returns payment-required header."
+          },
+          "503": {
+            "description": "Surface disabled (WZRD_AGENT_INTEL_ENABLED=false)."
+          }
+        },
+        "x402": {
+          "amount": "1000",
+          "price_usdc": 0.001,
+          "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+          "payTo": "GFpLvocNdEjnSsLH3VJQL6wGcjGxTbUBrj6fqN3Qe1Gs",
+          "scheme": "exact",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.001000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ],
+          "offers": [
+            {
+              "intent": "charge",
+              "method": "x402",
+              "amount": "1000",
+              "currency": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              "description": "USDC (base units, Solana mainnet mint) via x402; challenge served as HTTP 402."
+            }
+          ]
+        },
+        "parameters": [
+          {
+            "name": "pubkey",
+            "in": "path",
+            "required": true,
+            "description": "CRITICAL: Do NOT send the literal strings ':pubkey', '{pubkey}', ':solana_address', or '{wallet}'. You MUST substitute a valid base58 Solana wallet address (32-44 chars). Source it from accepts[].payTo on a 402 challenge or from free preflight seller_wallet.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+              "minLength": 32,
+              "maxLength": 44,
+              "example": "GFpLvocNdEjnSsLH3VJQL6wGcjGxTbUBrj6fqN3Qe1Gs"
+            },
+            "example": "GFpLvocNdEjnSsLH3VJQL6wGcjGxTbUBrj6fqN3Qe1Gs"
+          }
+        ]
+      }
+    },
+    "/v1/intel/trust/{pubkey}": {
+      "get": {
+        "operationId": "get_v1_intel_trust_pubkey",
+        "summary": "Fetch paid counterparty trust by pubkey",
+        "description": "x402 counterparty trust: a live reputation check before payment for any Solana wallet, scored from observed wallet age, payment history, execution evidence, and counterparty breadth, plus a portable V6 receipt. Proven on mainnet. Optional query: seller_wallet (the seller you are about to pay; arms the settle-time trust gate -- settlement is refused, charged:false, if that seller scores below threshold; the scored pubkey itself is never gated). x402-paid: 0.05 USDC (50000 base units) on Solana mainnet. Path A: bind to the accepts[] entry whose extra.feePayer you intend to pay; settle-rail settlement requires that feePayer to match GET /supported.",
+        "tags": [
+          "Paid Trust Intel (Path A)"
+        ],
+        "responses": {
+          "200": {
+            "description": "Paid response (JSON) including settlement tx.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "What the agent receives for the 0.05 USDC payment.",
+                  "properties": {
+                    "pubkey": {
+                      "type": "string",
+                      "description": "The scored wallet (base58)."
+                    },
+                    "score": {
+                      "type": "number",
+                      "description": "Renormalized 0-100 trust score (the value the V6 receipt attests)."
+                    },
+                    "score_raw": {
+                      "type": "number",
+                      "description": "Canonical pre-renormalization score."
+                    },
+                    "score_version": {
+                      "type": "string",
+                      "description": "Scoring model version, e.g. intel_renorm_v1_1."
+                    },
+                    "confidence": {
+                      "type": "number",
+                      "description": "0..1 share of axis weight backed by evidence."
+                    },
+                    "breadth_factor": {
+                      "type": "number",
+                      "description": "Counterparty-breadth multiplier."
+                    },
+                    "wash_factor": {
+                      "type": "number",
+                      "description": "Circular-flow wash discount (1.0 clean)."
+                    },
+                    "components": {
+                      "type": "object",
+                      "description": "Per-axis trust components."
+                    },
+                    "twzrd_receipt": {
+                      "type": "object",
+                      "description": "Portable Ed25519-signed V6 receipt (verify offline at /v1/receipts/verify).",
+                      "properties": {
+                        "leaf": {
+                          "type": "string",
+                          "description": "Hex keccak256 receipt leaf."
+                        },
+                        "preimage": {
+                          "type": "object",
+                          "description": "Fields that hash to the leaf."
+                        },
+                        "signature": {
+                          "type": "string",
+                          "description": "Ed25519 signature over the leaf."
+                        },
+                        "signing_pubkey": {
+                          "type": "string",
+                          "description": "Signer pubkey (base58)."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Payment required (x402). Returns payment-required header."
+          },
+          "503": {
+            "description": "Surface disabled (WZRD_AGENT_INTEL_ENABLED=false)."
+          }
+        },
+        "x402": {
+          "amount": "50000",
+          "price_usdc": 0.05,
+          "asset": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+          "network": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+          "payTo": "GFpLvocNdEjnSsLH3VJQL6wGcjGxTbUBrj6fqN3Qe1Gs",
+          "scheme": "exact",
+          "facilitator": "https://api.cdp.coinbase.com/platform/v2/x402"
+        },
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.050000"
+          },
+          "protocols": [
+            {
+              "x402": {}
+            }
+          ],
+          "offers": [
+            {
+              "intent": "charge",
+              "method": "x402",
+              "amount": "50000",
+              "currency": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+              "description": "USDC (base units, Solana mainnet mint) via x402; challenge served as HTTP 402."
+            }
+          ]
+        },
+        "parameters": [
+          {
+            "name": "pubkey",
+            "in": "path",
+            "required": true,
+            "description": "Solana wallet address (base58) to score; not identity proof. CRITICAL: Do NOT send the literal strings ':pubkey', '{pubkey}', or ':solana_address' \u2014 substitute a real base58 Solana wallet (example: GFpLvocNdEjnSsLH3VJQL6wGcjGxTbUBrj6fqN3Qe1Gs).",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9A-HJ-NP-Za-km-z]{32,44}$",
+              "minLength": 32,
+              "maxLength": 44,
+              "example": "GFpLvocNdEjnSsLH3VJQL6wGcjGxTbUBrj6fqN3Qe1Gs"
+            },
+            "example": "GFpLvocNdEjnSsLH3VJQL6wGcjGxTbUBrj6fqN3Qe1Gs"
+          },
+          {
+            "name": "seller_wallet",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Optional seller counterparty (base58) you are about to pay -- distinct from the scored {pubkey}. When set (or sent as the X-TWZRD-Seller-Wallet header), the settle-time trust gate evaluates this wallet and refuses to settle (402, charged:false, no on-chain tx) if it scores below threshold. The scored subject itself is never gated."
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,56 @@
+# DRAFT — NOT SUBMITTED. Illustrates what pay.sh listing would require.
+# Read catalog/pay-sh/FINDING.md first: adopting this spec means pay.sh's
+# gateway issues the 402 and collects payment, replacing our own x402 path.
+# yaml-language-server: $schema=https://pay.sh/docs-assets/provider.schema.json
+name: twzrd-intel
+subdomain: twzrd-intel
+title: 'TWZRD Agent Intelligence'
+description: >-
+  Pre-spend counterparty trust for x402 sellers. Observed Solana payment-graph
+  quality: circular-flow (wash) signal, inbound demand shape, listed vs
+  live-402-verified services. Down-only: never returns "allow".
+category: data
+version: v1
+
+routing:
+  type: proxy
+  url: https://intel.twzrd.xyz/
+
+operator:
+  currencies:
+    usd: ['USDC']
+  network: mainnet
+  fee_payer: true
+  # recipient: GFpLvocNdEjnSsLH3VJQL6wGcjGxTbUBrj6fqN3Qe1Gs
+  # ^ UNVERIFIED that this preserves our existing payTo. If the gateway
+  #   collects to its own operator signer instead, settlement has moved
+  #   and the listing is a re-plumb. Confirm before any submission.
+
+endpoints:
+  - method: GET
+    path: 'v1/intel/merchant_card/{wallet}'
+    description: 'Free merchant card: observed inbound payment-graph quality.'
+
+  - method: GET
+    path: 'v1/intel/quick/{pubkey}'
+    description: 'Quick seller risk score. Tier + score, no signed receipt.'
+    metering:
+      dimensions:
+        - direction: usage
+          unit: requests
+          scale: 1
+          tiers:
+            - price_usd: 0.001
+
+  - method: GET
+    path: 'v1/intel/trust/{pubkey}'
+    description: >-
+      Full corpus intel plus a portable Ed25519 V6 receipt verifiable offline.
+      Optional seller_wallet= applies the settle-time gate.
+    metering:
+      dimensions:
+        - direction: usage
+          unit: requests
+          scale: 1
+          tiers:
+            - price_usd: 0.05
