@@ -1,0 +1,11 @@
+hours 1441  2026-07-10 -> 2026-09-08  (60.0d)
+SOL $79.01 -> $104.07  (+31.71%)
+
+ width     final $     fees $  friction $  rebal  in-range   vs HODL50     vs SOL    vs lend
+    5%     108,537      9,643       1,096     15     99.0%      -7.32pp    -23.17pp      7.88pp
+   10%     109,444      9,814         365      5     99.7%      -6.41pp    -22.26pp      8.78pp
+   20%     109,698      9,872          73      1     99.9%      -6.16pp    -22.01pp      9.04pp
+
+baselines: HODL50/50 $115,854 (+15.85%)  100% SOL $131,709 (+31.71%)  Kamino $100,659 (+0.66%)
+
+KILL a (net <= higher baseline) at every width: True
