@@ -18,13 +18,27 @@ See the ID COLLISION header in that file before citing anything.
 (HODL 50/50) at all three widths. Parameters were fixed before the run and
 not retuned; the first set failed and that is the result.
 
-| Width | Final | Fees | Friction | Rebal | In-range | vs HODL 50/50 |
-|---|---|---|---|---|---|---|
-| ±5% | $108,537 | $9,643 | $1,096 | 15 | 99.0% | −7.32 pp |
-| ±10% | $109,444 | $9,814 | $365 | 5 | 99.7% | −6.41 pp |
-| ±20% | $109,698 | $9,872 | $73 | 1 | 99.9% | −6.16 pp |
+| Width | Final | Fees | Friction | Rebal | In-range | vs HODL 50/50 | vs lending |
+|---|---|---|---|---|---|---|---|
+| ±5% | $108,537 | $9,643 | $1,096 | 15 | 99.0% | −7.32 pp | −8.10 pp |
+| ±10% | $109,444 | $9,814 | $365 | 5 | 99.7% | −6.41 pp | −7.19 pp |
+| ±20% | $109,698 | $9,872 | $73 | 1 | 99.9% | −6.16 pp | −6.94 pp |
 
-Baselines over 60 days: HODL 50/50 +15.85%, 100% SOL +31.71%, Kamino +0.66%.
+Baselines over 60 days: HODL 50/50 **+15.85%**, 100% SOL **+31.71%**,
+50/50 Kamino lending **+16.64%**.
+
+**CORRECTION 2026-09-08 (external audit, accepted).** The lending baseline
+originally read **+0.66%** — interest only, with the SOL half's appreciation
+omitted while the LP and HODL books included it. A 50/50 *supplied* book still
+owns the SOL it lent. On $100k that omitted **$15,979** and inverted every
+"vs lend" comparison from a 7-9 pp win to a 7-8 pp loss. `sim.py` is fixed at
+source, not just in prose. **The correction strengthens the kill**: the
+strategy now loses to both baselines. Corrected lending also edges HODL 50/50
+by 0.78 pp, which is the expected result — same SOL exposure, plus interest.
+
+Rates are end-of-window spot applied across the window: a scenario, not a
+historical lending backtest. Kamino rates track reserve utilisation, so a
+true benchmark needs historical accrual factors.
 
 **Friction is not the finding.** $73 on $100k at ±20% is 0.07%. The 6 pp hole
 is inventory: the band sold SOL into a +31.7% rally. Execution optimisation

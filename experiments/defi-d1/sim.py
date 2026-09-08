@@ -5,8 +5,14 @@ Verbatim re-statement of the run recorded in memory/experiments.md
 (2026-09-08T01:3xZ). Parameters were fixed BEFORE the run and are not retuned:
 the first set failed, and that is the result.
 
-Verdict: KILL a — net yield <= the higher pre-registered baseline (HODL 50/50)
-at every width tested.
+Verdict: KILL a — net yield <= the higher pre-registered baseline at every
+width tested. The strategy loses to BOTH baselines: HODL 50/50 by 6.2-7.3 pp
+and 50/50 Kamino lending by 6.9-8.1 pp.
+
+Rates are end-of-window spot applied across the whole window. That is a
+scenario assumption, not a historical lending backtest: Kamino rates move
+with reserve utilisation, so a true benchmark needs historical accrual
+factors. Stated here rather than implied.
 
 Disclosed model choice (not fabricated data): an in-range position is granted
 the pool's realised average fee rate for that day. Per-tick liquidity, which
@@ -32,7 +38,8 @@ SWAP_FEE = 0.0004             # Orca lpFeeRate for this pool, 4 bps
 SLIPPAGE = 0.0010             # 10 bps on the rebalanced half
 PRIORITY_FEE_USD = 0.03       # priority fee + Jito tip per rebalance tx
 CAPITAL = 100_000.0
-KAMINO_BLENDED_APY = 0.0408   # (3.26 USDC + 4.89 SOL) / 2, DefiLlama spot
+KAMINO_USDC_APY = 0.0326483   # DefiLlama spot, kamino-lend USDC reserve
+KAMINO_SOL_APY = 0.0488925    # DefiLlama spot, kamino-lend SOL reserve
 
 
 def load():
@@ -83,7 +90,12 @@ def main():
     days = (px[-1][0] - px[0][0]).total_seconds() / 86400
     hodl = CAPITAL * (0.5 * r + 0.5)
     hodl_sol = CAPITAL * r
-    lend = CAPITAL * ((1 + KAMINO_BLENDED_APY) ** (days / 365))
+    # CORRECTED 2026-09-08 (external audit). A 50/50 SUPPLIED book still owns
+    # the SOL it lent: that half keeps appreciating while it earns interest.
+    # The original line accrued interest only and omitted $15,979 on $100k,
+    # which flipped the sign of every "vs lend" comparison.
+    lend = CAPITAL * (0.5 * r * (1 + KAMINO_SOL_APY) ** (days / 365)
+                      + 0.5 * (1 + KAMINO_USDC_APY) ** (days / 365))
 
     print(f"hours {len(px)}  {px[0][0].date()} -> {px[-1][0].date()}  ({days:.1f}d)")
     print(f"SOL ${p0:,.2f} -> ${p1:,.2f}  ({(r-1)*100:+.2f}%)\n")
