@@ -1,115 +1,67 @@
 # outbid
 
-Default routing table. **#1 is the next request to try.** Checkout is HTTP 402 (USDC).
+TWZRD token infrastructure. Public: `https://outbid.sh`.
 
-This is **not** TWZRD. Trust lives in `wzrd-final`. Agents: start at `AGENTS.md` then `GRAPH.md`. Do not copy monorepo layout into this tree.
+APIs settle in **USDC** (HTTP 402). The native token buys **capacity** — never the call. Slashing and PoEC-claim come after the lock.
 
-Live writer: `outbid-mainnet.service` → `src/server.js` on `127.0.0.1:4024`. Do not move that file.
+Agents: `AGENTS.md` → `GRAPH.md` → `graph/nodes/arch.md` + `graph/nodes/capacity.md`. Style: `agent.md`. Do not copy `wzrd-final` layout here.
 
-Two sides:
+Live writer: `outbid-mainnet.service` → `src/server.js` on `127.0.0.1:4024`. Do not move that file. Do not restart it for docs.
 
-- Buy a route (free): `GET /top` (peek) then `GET /route` / `POST /dispatch` → 302 to current #1, counted as a **dispatch**.
-- Sell a route: `POST /bid` unpaid → 402, paid → credited. Rank is the bid.
+## v0 lock table
 
-The listed URL is any HTTPS resource (Base x402, MCP, whatever). Settlement can be Solana. That cross-rail is the product, not a billboard of human clicks.
+| locked | wallets | spend cap | window |
+|---|---|---|---|
+| 1,000 | 1 | $100 | 24h |
+| 10,000 | 5 | $1,000 | 72h |
+| 100,000 | 25 | $10,000 | 168h |
 
-A 302's custom headers never reach the seller. Agents that consume as JSON (`Accept: application/json`) get `forward_headers` to copy onto the follow-up request so #1 can see they were dispatched.
+QPS unbound. Leash = authorized USDC spend cap. Agents never buy. No pool yet.
+
+v0 is a refundable license, not a bond. Unbond zeroes the grant immediately;
+tokens return after 24h. Burning the cap and exiting costs a day of
+liquidity, nothing more. Slash is the loss function and is not built.
+Do not call the lock collateral, stake, a bond, or "at risk". Honest
+words: license, seat, leash, allowance. Revisit when slash ships.
+
+Vault stores the lock. Intel applies the grant. Spec: `graph/nodes/capacity.md`.
+Client gate (refuse before sign): `src/leash/` — local reference module, not
+wired to `server.js`, no route. Cap is enforced off-chain by the paying client.
+Import as `outbid/leash`. Demo: `npm run leash:demo`.
+
+Mint: TWZRD, 6 decimals, 1B fixed to treasury, then revoke mint+freeze.
+PDA `["lock", locker]`. Token keys exist; mint waits operator confirmation
+of `memory/token-key-report.md`. No `/v0` routes and no `:4024` restart
+until a mainnet vault ships.
+
+## Keys
+
+Board 402 payTos stay in `~/security/wallets/outbid/`. Dedicated token keys exist in `~/security/wallets/outbid-token/` (directory 700, key files 600). The public-key report is in `memory/token-key-report.md`; operator confirmation is required before minting. Do not reuse board SVM.
+
+## Legacy board
+
+The x402 occupancy table still runs in this process:
 
 ```
-GET  /              spectator board (free)
-GET  /top           current #1 JSON (free, not counted)
-GET  /api/board     listings + dispatch_total (free)
-GET  /route         302 to #1 (free, counted); JSON if Accept: application/json
-POST /dispatch      same as GET /route
-GET  /skill.md      agent instructions (free) — get_top / dispatch first, bid optional
-POST /bid
-     body {"url":"https://example.com","amount":0.05,"description":"one line"}
-     unpaid → 402 PAYMENT-REQUIRED (priced from amount)
-     paid   → settled → credited
+GET  /top           current #1 JSON (free)
+GET  /route         402 then #1 ($0.01 USDC → last_payer)
+POST /bid           unpaid → 402; paid → credited
+GET  /skill.md      board agent instructions
 ```
 
-Minimum **$0.01**. Same URL again **adds** to its total.
-
-`GET /go/:id` still increments leftover **clicks** for the human page. Clicks are not demand. The product metric is `dispatch_total`.
-
-## What gets credited
-
-The request's `amount` only prices the 402 challenge. The board credits the
-**settled** amount — read in the `onAfterSettle` hook from the payment
-requirements the facilitator actually settled, with payer and tx from the
-settlement result. Consequences:
-
-- A spoofed `amount`, header, or body claim credits nothing.
-- An invalid bid (bad URL) returns 400 **before settlement** — the middleware
-  cancels the payment, no money moves.
-- If settlement fails after the handler, the middleware discards the response
-  and nothing was written — the handler never touches the store.
-- Credits are idempotent on `(network, tx)`: a facilitator retry or double
-  hook credits once.
-- A settled payment that somehow fails to credit is appended to
-  `data/settled-uncredited.jsonl` for manual replay — never silently lost.
-
-## Dry vs live
-
-`X402_DRY=1` with **no wallet configured** enables `POST /bid/dry` (no chain,
-dev only) on its own data file `data/board.dry.json`. The moment
-`EVM_ADDRESS`/`SVM_ADDRESS` is set, dry is force-disabled and the live board is
-`data/board.json`. The two never share a file.
-
-## Run
+That module is **legacy**, not a 402 mint. Rank is still USDC bid. Token-weight on `#1` is later.
 
 ```bash
-cp .env.example .env
-# optional: EVM_ADDRESS / SVM_ADDRESS for live 402
-npm install
-npm test           # includes a full 402→pay→settle→credit e2e against a mock facilitator
-npm start          # http://127.0.0.1:4021
+npm test
+npm start          # http://127.0.0.1:4021 locally
 ```
 
-Default facilitator is `https://x402.org/facilitator` (Base Sepolia + Solana
-devnet). Do not use that URL on mainnet.
-
-## Bid from an agent
-
-```bash
-# dry (dev instance)
-curl -s -X POST 'http://127.0.0.1:4021/bid/dry' \
-  -H 'content-type: application/json' \
-  -d '{"url":"https://example.com","amount":0.05,"description":"hello"}'
-
-# live 402 — any x402 payer
-npx agentcash@latest fetch 'http://127.0.0.1:4021/bid?amount=0.05'
-node scripts/bid.mjs https://example.com 0.05 "hello"
-```
-
-Live public: `https://outbid.sh`. Spec for the consume-side flywheel: `PHASE-2.md`.
-Agent briefing: `AGENTS.md`.
+Live facilitator is PayAI. Dry `X402_DRY=1` is local-only.
 
 ## Status
 
-Proven: mock e2e, Base Sepolia, Solana mainnet via PayAI,
-PUBLIC_BASE_URL pin, `GET /top` peek + `GET /route` dispatch vs click.
-Seed row on `https://outbid.sh` is dogfood. First foreign dispatch — a
-foreign agent's next call going through `/route` — is the real test, not
-another bid.
-
-Do not treat this README as the ops ledger — see `PHASE-2.md` and the Claude
-project memory `outbid-board-state.md`.
-
-## Wallets
-
-Dedicated keys live **outside the repo**:
-
-`/home/twzrd/security/wallets/outbid/` (dir 700, secrets 600)
-
-```bash
-npm run wallets:init      # generate receiver + payer (EVM + SVM), write .env.live
-npm run wallets:status    # pubkeys + balances, never prints secrets
-```
-
-Payer secrets are loaded from those files (`EVM_PRIVATE_KEY_FILE` /
-`SVM_PRIVATE_KEY_FILE` in `.env.live`). Do not paste keys into `.env`.
-Do not use Path A (`GFpLvoc…`) or the settle feePayer (`4LkEFj…`) as outbid
-wallets — those are the TWZRD serving stack.
-
-This tree is standalone. It is not the TWZRD serving stack.
+Control plane: live (board). Token keys validated on 2026-09-07; proposed
+mint absent on mainnet. Local vault gate passed
+(`node programs/token-vault/scripts/e2e-lock.mjs`). Mint, mainnet deploy,
+`/v0`, and `:4024` remain held. Vault contract:
+[programs/token-vault/README.md](programs/token-vault/README.md).

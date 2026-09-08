@@ -4,18 +4,27 @@
   "private": true,
   "type": "module",
   "description": "Pay-to-rank board. Rank is the bid. Checkout is HTTP 402.",
+  "exports": {
+    "./leash": "./src/leash/index.mjs",
+    "./leash/lock": "./src/leash/lock.mjs",
+    "./leash/journal": "./src/leash/journal.mjs",
+    "./leash/roster": "./src/leash/roster.mjs",
+    "./leash/signer": "./src/leash/signer.mjs"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "bid": "node scripts/bid.mjs",
     "wallets:init": "node scripts/init-wallets.mjs",
     "wallets:status": "node scripts/wallet-status.mjs",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "leash:demo": "node scripts/simulate-x402-preflight.mjs"
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
+    "@solana/kit": "5.5.1",
     "@x402/core": "2.23.0",
     "@x402/evm": "2.23.0",
     "@x402/express": "2.23.0",

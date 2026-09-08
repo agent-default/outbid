@@ -1,0 +1,18 @@
+[package]
+name = "token-vault"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "token_vault"
+
+[features]
+no-entrypoint = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+solana-program = "~1.18.26"
+spl-token = { version = "=4.0.0", features = ["no-entrypoint"] }

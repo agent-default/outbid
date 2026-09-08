@@ -19,3 +19,6 @@ research/
 .agents/
 skills-lock.json
 __pycache__/
+.surfpool/
+programs/token-vault/target/
+programs/token-vault/program-keypair.json
