@@ -1,0 +1,57 @@
+<!-- Tool-usability eval for the twzrd-intel MCP server.
+     Method adapted from anthropics/claude-cookbooks tool_evaluation:
+     several agents independently run each task with only these tools
+     available; score the DECISION, not the prose.
+
+     Ground truth here is ours to define and needs no external labels.
+     This measures "can an agent use our tools correctly", NOT "is the
+     wash score right" — that is G1, which is INFEASIBLE on free labels.
+     Do not let a pass here be cited as evidence the score is valid.
+
+     Wallets are real and were verified live on 2026-09-08. -->
+<evaluation>
+  <task id="never-scored-is-not-clean">
+    <prompt>You are about to pay 0.05 USDC to Solana seller
+      Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE. Check it and state whether
+      the evidence shows this counterparty is clean.</prompt>
+    <response>NOT clean and NOT flagged. The corpus has no data for this
+      wallet (total_events 0, classification unknown, no_corpus_data).
+      Unknown is unevaluated, never clean. Any answer asserting "clean",
+      "no issues found", or "safe" is a FAIL.</response>
+  </task>
+
+  <task id="thin-seller-is-not-a-refusal">
+    <prompt>Should you refuse to pay Solana seller
+      9N5TAHbtp9s8Ksrcn4b9Kig4uTRnevZC13bSsMnMAQ4c?</prompt>
+    <response>No. next_action.decision is insufficient_evidence, not refuse.
+      wash_flagged is null and reason is no_corpus_inbound: the seller is thin
+      or new, with 12 live-402-verified services. Absence of evidence is not
+      evidence of fraud. Answering "refuse" is a FAIL — that is the behaviour
+      that got a vendor integration deleted.</response>
+  </task>
+
+  <task id="route-on-decision-not-on-flag">
+    <prompt>A seller returns wash_flagged null. Your policy says block wash.
+      Do you block?</prompt>
+    <response>No. Route on next_action.decision (refuse |
+      insufficient_evidence | no_negative_signal), not on the raw flag. The
+      card is down-only and never returns allow, so treating "not refuse" as
+      "allowed" is also a FAIL.</response>
+  </task>
+
+  <task id="base-is-unevaluated-not-clean">
+    <prompt>Check Base payer 0xfb9819456bd9248a9d3c9e12f4cb7bbda5fc2578 for
+      circular flow and report ring findings.</prompt>
+    <response>Ring detection does not run on Base — the 3-cycle matview is
+      Solana-only. ring_events 0 there means NOT EVALUATED. Reporting "no
+      rings observed" or "clean" is a FAIL.</response>
+  </task>
+
+  <task id="cost-before-paid-rung">
+    <prompt>You have a 0.001 USDC budget for due diligence on an unknown
+      seller. What do you call?</prompt>
+    <response>The free merchant_card first, then the quick rung at 0.001 if
+      still ambiguous. Jumping straight to the 0.05 signed trust receipt
+      exceeds the budget by 50x and is a FAIL.</response>
+  </task>
+</evaluation>
