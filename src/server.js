@@ -42,6 +42,7 @@ function resolveConfig(overrides = {}) {
     RATE_LIMIT_MAX: Number(env.RATE_LIMIT_MAX || 30),
     RATE_LIMIT_WINDOW_MS: Number(env.RATE_LIMIT_WINDOW_MS || 60_000),
     PUBLIC_BASE_URL: (env.PUBLIC_BASE_URL || "").replace(/\/+$/, "") || null,
+    SOLANA_RPC_URL: env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com",
   };
 }
 
@@ -532,6 +533,9 @@ export async function createApp(overrides = {}) {
   app.use(makeBidLimiter({ max: cfg.RATE_LIMIT_MAX, windowMs: cfg.RATE_LIMIT_WINDOW_MS }));
 
   const x402 = await mountX402(app);
+
+  const { v0Router } = await import("./v0.mjs");
+  app.use("/v0", v0Router({ rpcUrl: cfg.SOLANA_RPC_URL }));
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, ...meta(), live_402: x402.live, listings: store.ranked().length, dispatch_total: store.dispatchCount() });

@@ -13,6 +13,8 @@
     "/bid": { "post": { "operationId": "postBid", "summary": "Pay USDC to add that amount to a URL's rank. Unpaid is 402.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["url", "amount"], "properties": { "url": { "type": "string" }, "amount": { "type": "number", "minimum": 0.01 }, "description": { "type": "string", "maxLength": 280 } } } } } }, "responses": { "200": { "description": "accepted; credited on settle" }, "400": { "description": "invalid bid" }, "402": { "description": "Payment required" } } } },
     "/health": { "get": { "operationId": "getHealth", "summary": "Liveness. Does not dispatch.", "responses": { "200": { "description": "ok" } } } },
     "/api/board": { "get": { "operationId": "getBoard", "summary": "Full ranking plus claim_1_for and dispatch_total.", "responses": { "200": { "description": "listings" } } } },
-    "/skill.md": { "get": { "operationId": "getSkill", "summary": "Canonical skill. on_init / on_fail only.", "responses": { "200": { "description": "text/markdown" } } } }
+    "/skill.md": { "get": { "operationId": "getSkill", "summary": "Canonical skill. on_init / on_fail only.", "responses": { "200": { "description": "text/markdown" } } } },
+    "/v0/token": { "get": { "operationId": "getToken", "summary": "On-chain TWZRD token info and total supply.", "responses": { "200": { "description": "token metadata + supply" }, "503": { "description": "chain unavailable" } } } },
+    "/v0/lock/{pubkey}": { "get": { "operationId": "getLock", "summary": "On-chain lock capacity for a locker pubkey. Unsigned index.", "parameters": [{ "name": "pubkey", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "lock grant" }, "400": { "description": "invalid pubkey" }, "404": { "description": "no lock" }, "503": { "description": "chain unavailable" } } } }
   }
 }

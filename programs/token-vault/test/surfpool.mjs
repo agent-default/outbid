@@ -47,7 +47,8 @@ export async function startSurfpool() {
     }
     await fs.rm(cwd, { recursive: true, force: true });
   }
-  const rpc = localRpc(`http://127.0.0.1:${port}`);
+  const url = `http://127.0.0.1:${port}`;
+  const rpc = localRpc(url);
   try {
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
@@ -56,7 +57,7 @@ export async function startSurfpool() {
       }
       try {
         await rpc("getHealth");
-        return { rpc, stop };
+        return { rpc, stop, url };
       } catch {
         await delay(50);
       }
