@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import express from "express";
 import { createStore, formatPrice, normalizeTarget, parseAmount, MIN_USDC } from "./store.js";
 import { mountMcp } from "./mcp.js";
+import { FIRST_PARTY_JOBS, JOB_PATHS, assertPublicHttpUrl, formatJobPrice, jobsEnabled, mountJobs, normalizePaidPath, stripJobTrailingSlash } from "./jobs.mjs";
 
 dotenv.config();
 
@@ -43,7 +44,31 @@ function resolveConfig(overrides = {}) {
     RATE_LIMIT_WINDOW_MS: Number(env.RATE_LIMIT_WINDOW_MS || 60_000),
     PUBLIC_BASE_URL: (env.PUBLIC_BASE_URL || "").replace(/\/+$/, "") || null,
     SOLANA_RPC_URL: env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com",
+    jobsEnabled: jobsEnabled(env),
+    readerBase: env.READER_BASE_URL || "https://reader.outbid.sh",
+    jobsReaderPay: env.JOBS_READER_PAY === "1",
+    jobsPayModule: env.JOBS_PAY_MODULE || "",
+    jobsHouseSvmKey: env.JOBS_HOUSE_SVM_KEY_FILE || "",
+    jobsHouseEvmKey: env.JOBS_HOUSE_EVM_KEY_FILE || "",
   };
+}
+
+function housePayEnv(cfg, overrides = {}) {
+  const svm = cfg.jobsHouseSvmKey || overrides.JOBS_HOUSE_SVM_KEY_FILE || "";
+  const evm = cfg.jobsHouseEvmKey || overrides.JOBS_HOUSE_EVM_KEY_FILE || "";
+  if (/payer\.svm\.json$/i.test(svm)) {
+    throw new Error("refusing outbid merchant payer.svm.json for house-pay");
+  }
+  const out = {};
+  if (svm) out.SVM_PRIVATE_KEY_FILE = svm;
+  if (evm) out.EVM_PRIVATE_KEY_FILE = evm;
+  if (overrides.JOBS_HOUSE_SVM_RPC_URL || cfg.SOLANA_RPC_URL) {
+    out.SVM_RPC_URL = overrides.JOBS_HOUSE_SVM_RPC_URL || cfg.SOLANA_RPC_URL;
+  }
+  if (overrides.X402_READER_MAX_USDC_PER_CALL) out.X402_READER_MAX_USDC_PER_CALL = overrides.X402_READER_MAX_USDC_PER_CALL;
+  if (overrides.X402_READER_MAX_USDC_TOTAL) out.X402_READER_MAX_USDC_TOTAL = overrides.X402_READER_MAX_USDC_TOTAL;
+  if (overrides.X402_READER_SPENT_FILE) out.X402_READER_SPENT_FILE = overrides.X402_READER_SPENT_FILE;
+  return out;
 }
 
 function firstHop(value) {
@@ -105,6 +130,11 @@ export async function createApp(overrides = {}) {
       top: "GET /top — current #1 JSON (free, not counted)",
       dispatch: "GET /route | POST /dispatch — counted dispatch to #1",
       bid: 'POST /bid  body {"url","amount","description"} (optional)',
+      jobs: cfg.jobsEnabled
+        ? (cfg.jobsReaderPay
+          ? "GET /jobs — first-party paid utilities (scrape/browse/hop, house-pay on)"
+          : "GET /jobs — hop fulfills; scrape/browse 502 until house-pay")
+        : "GET /jobs — dark until JOBS_ENABLED=1",
     };
   }
 
@@ -158,8 +188,8 @@ export async function createApp(overrides = {}) {
     // url/description from the request body via the transport context.
     resourceServer.onAfterSettle(async (context) => {
       const request = context.transportContext?.request;
-      const path = request?.path;
-      if (["/next", "/dispatch/next", "/route", "/dispatch"].includes(path)) {
+      const path = normalizePaidPath(request?.path);
+      if (["/next", "/dispatch/next", "/route", "/dispatch", "/job/hop"].includes(path)) {
         if (context.result?.success === false) return;
         const rec = {
           tx: context.result?.transaction,
@@ -174,6 +204,11 @@ export async function createApp(overrides = {}) {
         } catch (err) {
           deadLetter({ ...rec, path, error: String(err) });
         }
+        return;
+      }
+      if (path === "/job/scrape" || path === "/job/browse") {
+        if (context.result?.success === false) return;
+        console.log("job settled", path, context.result?.transaction, context.result?.payer);
         return;
       }
       if (path !== "/bid") return;
@@ -232,7 +267,7 @@ export async function createApp(overrides = {}) {
     const nextAccepts = [];
     const nextPrice = formatPrice(MIN_USDC);
     app.use((req, res, next) => {
-      if (!["/next", "/dispatch/next", "/route", "/dispatch"].includes(req.path)) return next();
+      if (!["/next", "/dispatch/next", "/route", "/dispatch", "/job/hop"].includes(req.path)) return next();
       nextAccepts.length = 0;
       const top = store.ranked()[0];
       if (!top) return res.status(404).json({ ok: false, error: "no #1 last_payer" });
@@ -258,7 +293,10 @@ export async function createApp(overrides = {}) {
     // tutorial code — see a paywall with no invoice and loop forever (the
     // funnel showed 17 IPs with paid intent stuck exactly there). Mirror the
     // decoded header into any empty 402 body, plus a hint for humans/LLMs.
-    const PAID_402_PATHS = new Set(["/bid", "/next", "/dispatch/next", "/route", "/dispatch"]);
+    const PAID_402_PATHS = new Set([
+      "/bid", "/next", "/dispatch/next", "/route", "/dispatch",
+      ...(cfg.jobsEnabled ? JOB_PATHS : []),
+    ]);
     // Dialect split, measured 10:32Z: x402-fetch@1.1.0 (the v1 tutorial client)
     // parses the 402 BODY and dies on CAIP-2 network names (zod enum wants
     // "base"/"solana"). Modern clients read the v2 PAYMENT-REQUIRED header and
@@ -278,7 +316,7 @@ export async function createApp(overrides = {}) {
     const wireQuotes = new Map();
     const quoteKey = (req) => `${req.path}|${clientIp(req) || "?"}`;
     app.use((req, res, next) => {
-      if (!PAID_402_PATHS.has(req.path)) return next();
+      if (!PAID_402_PATHS.has(normalizePaidPath(req.path))) return next();
       const origJson = res.json.bind(res);
       res.json = (body) => {
         if (res.statusCode === 402 && (!body || !body.accepts)) {
@@ -320,7 +358,7 @@ export async function createApp(overrides = {}) {
     // the caller's own cached quote. The EIP-3009 signature binds chainId, not
     // these labels; re-wrapping the envelope is safe.
     app.use((req, _res, next) => {
-      if (!PAID_402_PATHS.has(req.path)) return next();
+      if (!PAID_402_PATHS.has(normalizePaidPath(req.path))) return next();
       const raw = req.headers["payment-signature"] || req.headers["x-payment"];
       if (!raw) return next();
       try {
@@ -393,6 +431,29 @@ export async function createApp(overrides = {}) {
               "Bidding is POST /bid with a JSON body. This challenge exists so the paywall is visible to GET; pay and POST.",
             mimeType: "application/json",
           },
+          ...(cfg.jobsEnabled ? {
+            "GET /job/scrape": {
+              accepts: [
+                cfg.EVM_ADDRESS && { scheme: "exact", price: formatJobPrice(FIRST_PARTY_JOBS.scrape.price_usdc), network: cfg.EVM_NETWORK, payTo: cfg.EVM_ADDRESS },
+                cfg.SVM_ADDRESS && { scheme: "exact", price: formatJobPrice(FIRST_PARTY_JOBS.scrape.price_usdc), network: cfg.SVM_NETWORK, payTo: cfg.SVM_ADDRESS },
+              ].filter(Boolean),
+              description: "First-party scrape. $0.005 USDC. Never opens browse.",
+              mimeType: "application/json",
+            },
+            "GET /job/browse": {
+              accepts: [
+                cfg.EVM_ADDRESS && { scheme: "exact", price: formatJobPrice(FIRST_PARTY_JOBS.browse.price_usdc), network: cfg.EVM_NETWORK, payTo: cfg.EVM_ADDRESS },
+                cfg.SVM_ADDRESS && { scheme: "exact", price: formatJobPrice(FIRST_PARTY_JOBS.browse.price_usdc), network: cfg.SVM_NETWORK, payTo: cfg.SVM_ADDRESS },
+              ].filter(Boolean),
+              description: "First-party browse. $0.05 USDC. Opt-in only.",
+              mimeType: "application/json",
+            },
+            "GET /job/hop": {
+              accepts: nextAccepts,
+              description: "Leftover occupancy hop. $0.01 USDC to #1 last_payer.",
+              mimeType: "application/json",
+            },
+          } : {}),
           "POST /bid": {
             accepts: paidAccepts,
             description:
@@ -429,11 +490,18 @@ export async function createApp(overrides = {}) {
         resourceServer,
       ),
     );
+    if (cfg.jobsEnabled) {
+      app.use((req, _res, next) => {
+        if (JOB_PATHS.includes(normalizePaidPath(req.path))) req.outbidJobSettled = true;
+        next();
+      });
+    }
     return { live: true };
   }
 
   const app = express();
   app.disable("x-powered-by");
+  app.use(stripJobTrailingSlash);
   // Only our own reverse proxy (Tailscale funnel / Vercel) can reach the
   // loopback port, so trust its forwarding headers: this makes req.protocol
   // honor x-forwarded-proto (https, not the http loopback origin).
@@ -477,7 +545,7 @@ export async function createApp(overrides = {}) {
   // Eyes: append-only wire log for the caller-facing paths, existing headers
   // only — no new protocol. Mounted before the limiter and the 402 middleware
   // so challenges and 429s leave a trace too. Never blocks or fails a reply.
-  const LOGGED_PATHS = new Set(["/route", "/dispatch", "/bid", "/skill.md", "/next", "/dispatch/next", "/.well-known/x402", "/.well-known/api-catalog", "/.well-known/agent-skills/index.json"]);
+  const LOGGED_PATHS = new Set(["/route", "/dispatch", "/bid", "/skill.md", "/next", "/dispatch/next", "/.well-known/x402", "/.well-known/api-catalog", "/.well-known/agent-skills/index.json", "/jobs", "/job/scrape", "/job/browse", "/job/hop"]);
   fs.mkdirSync(path.dirname(cfg.DISPATCH_LOG), { recursive: true });
   app.use((req, res, next) => {
     if (LOGGED_PATHS.has(req.path)) {
@@ -532,7 +600,34 @@ export async function createApp(overrides = {}) {
   // to spam, so they get limited too.
   app.use(makeBidLimiter({ max: cfg.RATE_LIMIT_MAX, windowMs: cfg.RATE_LIMIT_WINDOW_MS }));
 
+  app.use(async (req, res, next) => {
+    if (!cfg.jobsEnabled) return next();
+    const p = normalizePaidPath(req.path);
+    if ((p !== "/job/scrape" && p !== "/job/browse") || (req.method !== "GET" && req.method !== "HEAD")) return next();
+    const raw = String(req.query.url || "").trim();
+    if (!raw) return res.status(400).json({ ok: false, error: "url is required", job: p.slice("/job/".length) });
+    try {
+      await assertPublicHttpUrl(raw);
+    } catch (err) {
+      return res.status(400).json({ ok: false, error: err.message, job: p.slice("/job/".length) });
+    }
+    next();
+  });
+
   const x402 = await mountX402(app);
+
+  let jobsFetch = overrides.jobsFetch || fetch;
+  let housePayArmed = false;
+  if (cfg.jobsEnabled && cfg.jobsReaderPay && cfg.jobsPayModule) {
+    try {
+      const pay = await import(cfg.jobsPayModule);
+      jobsFetch = await pay.createPaymentFetch({ env: housePayEnv(cfg, overrides) });
+      housePayArmed = true;
+      console.log("jobs house-pay reader armed");
+    } catch (err) {
+      console.error("jobs house-pay not armed; settled scrape will 502 on reader 402:", err.message);
+    }
+  }
 
   const { v0Router } = await import("./v0.mjs");
   app.use("/v0", v0Router({ rpcUrl: cfg.SOLANA_RPC_URL }));
@@ -820,11 +915,40 @@ export async function createApp(overrides = {}) {
           description: "Paid dispatch: $0.01 USDC to current #1 last_payer. Same circuit as GET /route.",
           accepts: nextWellKnownAccepts(),
         },
+        ...(cfg.jobsEnabled && housePayArmed ? [
+          {
+            url: `${base}/job/scrape`,
+            method: "GET",
+            description: "First-party scrape $0.005. Query url=. Never opens browse.",
+            accepts: [
+              cfg.EVM_ADDRESS && { scheme: "exact", price: formatJobPrice(FIRST_PARTY_JOBS.scrape.price_usdc), network: cfg.EVM_NETWORK, payTo: cfg.EVM_ADDRESS },
+              cfg.SVM_ADDRESS && { scheme: "exact", price: formatJobPrice(FIRST_PARTY_JOBS.scrape.price_usdc), network: cfg.SVM_NETWORK, payTo: cfg.SVM_ADDRESS },
+            ].filter(Boolean),
+          },
+          {
+            url: `${base}/job/browse`,
+            method: "GET",
+            description: "First-party browse $0.05. Query url=. Opt-in only.",
+            accepts: [
+              cfg.EVM_ADDRESS && { scheme: "exact", price: formatJobPrice(FIRST_PARTY_JOBS.browse.price_usdc), network: cfg.EVM_NETWORK, payTo: cfg.EVM_ADDRESS },
+              cfg.SVM_ADDRESS && { scheme: "exact", price: formatJobPrice(FIRST_PARTY_JOBS.browse.price_usdc), network: cfg.SVM_NETWORK, payTo: cfg.SVM_ADDRESS },
+            ].filter(Boolean),
+          },
+        ] : []),
+        ...(cfg.jobsEnabled ? [
+          {
+            url: `${base}/job/hop`,
+            method: "GET",
+            description: "Leftover occupancy hop $0.01 to #1 last_payer.",
+            accepts: nextWellKnownAccepts(),
+          },
+        ] : []),
       ],
       free_resources: [
         { url: `${base}/top`, method: "GET", description: "Current #1 JSON. Not counted. get_top." },
         { url: `${base}/api/board`, method: "GET", description: "Full ranking + dispatch_total." },
         { url: `${base}/skill.md`, method: "GET" },
+        ...(cfg.jobsEnabled ? [{ url: `${base}/jobs`, method: "GET", description: "First-party job catalog. Free." }] : []),
       ],
     });
   });
@@ -904,6 +1028,24 @@ export async function createApp(overrides = {}) {
 
   // Spectator MCP (peek_top / get_board / get_skill). No counted /route.
   mountMcp(app, { store, skillText, baseUrl });
+
+  // First-party jobs. Off on live :4024 until JOBS_ENABLED=1 + GO restart.
+  mountJobs(app, {
+    enabled: cfg.jobsEnabled,
+    publicBase: cfg.PUBLIC_BASE_URL,
+    evmPayTo: cfg.EVM_ADDRESS || null,
+    svmPayTo: cfg.SVM_ADDRESS || null,
+    evmNetwork: cfg.EVM_NETWORK,
+    svmNetwork: cfg.SVM_NETWORK,
+    readerBase: cfg.readerBase,
+    fetchImpl: jobsFetch,
+    housePay: housePayArmed,
+    isSettled: overrides.jobsIsSettled || ((req) => req.outbidJobSettled === true),
+    fulfillHop: (req, res) => {
+      if (!x402.live) return res.status(503).json({ ok: false, error: "hop needs live 402", leftover: "/route" });
+      return sendRoute(req, res, true);
+    },
+  });
 
   app._outbid = { store, cfg, live: x402.live };
   app.use((req, res) => {

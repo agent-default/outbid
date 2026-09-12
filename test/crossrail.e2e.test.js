@@ -16,9 +16,7 @@
 //     and txs on one URL sum into one bid_usdc, and replays on either rail
 //     are ignored per (network, tx).
 //
-// ../src/server.js may be mid-edit by a peer session. If importing it throws,
-// the 402-surface tests SKIP with a note and the store-level tests still run
-// and must pass — they import only ../src/store.js.
+// Import and startup failures must fail this check, not skip HTTP coverage.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
@@ -47,7 +45,6 @@ const deadLetterFile = path.join(os.tmpdir(), `outbid-crossrail-dead-${process.p
 let facilitator;
 let boardServer;
 let base;
-let serverImportError = null;
 
 function startMockFacilitator() {
   const f = express();
@@ -83,26 +80,20 @@ function startMockFacilitator() {
 
 before(async () => {
   facilitator = await startMockFacilitator();
-  try {
-    const { createApp } = await import("../src/server.js");
-    const app = await createApp({
-      EVM_ADDRESS: EVM_RECEIVER,
-      EVM_NETWORK,
-      SVM_ADDRESS: SVM_RECEIVER,
-      SVM_NETWORK,
-      FACILITATOR_URL: `http://127.0.0.1:${facilitator.address().port}`,
-      X402_DRY: "0",
-      DATA_FILE: dataFile,
-      DEAD_LETTER_FILE: deadLetterFile,
-    });
-    boardServer = http.createServer(app);
-    await new Promise((resolve) => boardServer.listen(0, "127.0.0.1", resolve));
-    base = `http://127.0.0.1:${boardServer.address().port}`;
-  } catch (err) {
-    // ../src/server.js is mid-edit (peer session). Store-level tests below
-    // do not depend on it and must still pass.
-    serverImportError = err;
-  }
+  const { createApp } = await import("../src/server.js");
+  const app = await createApp({
+    EVM_ADDRESS: EVM_RECEIVER,
+    EVM_NETWORK,
+    SVM_ADDRESS: SVM_RECEIVER,
+    SVM_NETWORK,
+    FACILITATOR_URL: `http://127.0.0.1:${facilitator.address().port}`,
+    X402_DRY: "0",
+    DATA_FILE: dataFile,
+    DEAD_LETTER_FILE: deadLetterFile,
+  });
+  boardServer = http.createServer(app);
+  await new Promise((resolve) => boardServer.listen(0, "127.0.0.1", resolve));
+  base = `http://127.0.0.1:${boardServer.address().port}`;
 });
 
 after(() => {
@@ -113,20 +104,11 @@ after(() => {
   fs.rmSync(deadLetterFile, { force: true });
 });
 
-function skipIfServerBroken(t) {
-  if (serverImportError) {
-    t.skip(`../src/server.js failed to import (mid-edit?): ${serverImportError.message}`);
-    return true;
-  }
-  return false;
-}
-
 // ---------------------------------------------------------------------------
 // 402 surface — both rails offered in one challenge
 // ---------------------------------------------------------------------------
 
-test("unpaid POST /bid returns one 402 offering BOTH Base mainnet and Solana mainnet accepts", async (t) => {
-  if (skipIfServerBroken(t)) return;
+test("unpaid POST /bid returns one 402 offering BOTH Base mainnet and Solana mainnet accepts", async () => {
   const res = await fetch(`${base}/bid`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -156,8 +138,7 @@ test("unpaid POST /bid returns one 402 offering BOTH Base mainnet and Solana mai
   assert.equal(svm.extra?.feePayer, SVM_FEE_PAYER);
 });
 
-test("GET /api/meta advertises both rails", async (t) => {
-  if (skipIfServerBroken(t)) return;
+test("GET /api/meta advertises both rails", async () => {
   const res = await fetch(`${base}/api/meta`);
   assert.equal(res.status, 200);
   const meta = await res.json();
@@ -170,7 +151,7 @@ test("GET /api/meta advertises both rails", async (t) => {
 
 // ---------------------------------------------------------------------------
 // Board surface — settles on either rail credit the SAME listing
-// (store-only: must pass even while ../src/server.js is mid-edit)
+// Store-only coverage also runs independently in test/store.test.js.
 // ---------------------------------------------------------------------------
 
 test("credit() on both rails sums into ONE listing's bid_usdc", () => {
