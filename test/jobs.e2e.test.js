@@ -94,11 +94,18 @@ before(async () => {
   base = `http://127.0.0.1:${boardServer.address().port}`;
 });
 
+function reapBoardFiles(...files) {
+  for (const file of files) {
+    fs.rmSync(file, { force: true });
+    const parsed = path.parse(file);
+    fs.rmSync(path.join(parsed.dir, `${parsed.name}.dispatches.jsonl`), { force: true });
+  }
+}
+
 after(() => {
   boardServer?.close();
   facilitator?.close();
-  fs.rmSync(dataFile, { force: true });
-  fs.rmSync(deadLetterFile, { force: true });
+  reapBoardFiles(dataFile, deadLetterFile);
 });
 
 test("jobs live: unpaid and spoofed scrape stay 402; no reader call", async () => {
@@ -160,6 +167,6 @@ test("jobs live: reader 402 becomes 502 and cancels settle", async () => {
     assert.equal(facilitatorCalls.settle, settleBefore, "502 must cancel authorization-flow settle");
   } finally {
     srv.close();
-    fs.rmSync(data, { force: true });
+    reapBoardFiles(data);
   }
 });

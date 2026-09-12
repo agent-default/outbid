@@ -86,11 +86,18 @@ before(async () => {
   base = `http://127.0.0.1:${boardServer.address().port}`;
 });
 
+function reapBoardFiles(...files) {
+  for (const file of files) {
+    fs.rmSync(file, { force: true });
+    const parsed = path.parse(file);
+    fs.rmSync(path.join(parsed.dir, `${parsed.name}.dispatches.jsonl`), { force: true });
+  }
+}
+
 after(() => {
   boardServer?.close();
   facilitator?.close();
-  fs.rmSync(dataFile, { force: true });
-  fs.rmSync(deadLetterFile, { force: true });
+  reapBoardFiles(dataFile, deadLetterFile);
 });
 
 function paidFetch() {
@@ -156,7 +163,7 @@ test("PUBLIC_BASE_URL forces 402 resource.url scheme+host (leak #6)", async () =
     assert.match(skill, /POST https:\/\/outbid\.sh\/bid/);
   } finally {
     srv.close();
-    fs.rmSync(data, { force: true });
+    reapBoardFiles(data);
   }
 });
 
