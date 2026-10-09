@@ -69,16 +69,26 @@
     let meta = { dry: true, claim_1_for: 0.01 };
 
     async function load() {
-      const [m, b] = await Promise.all([
-        fetch("/api/meta").then((r) => r.json()),
-        fetch("/api/board").then((r) => r.json()),
-      ]);
+      const board = $("board");
+      if (!board.dataset.ready) board.innerHTML = "<li class='desc'>Loading the board.</li>";
+      let m;
+      let b;
+      try {
+        [m, b] = await Promise.all([
+          fetch("/api/meta").then((r) => r.json()),
+          fetch("/api/board").then((r) => r.json()),
+        ]);
+      } catch {
+        board.innerHTML = "<li class='err'>Could not load the board. Nothing was changed.</li>";
+        return;
+      }
       meta = m;
       $("form").amount.value = b.claim_1_for.toFixed(2);
       $("hint").textContent = m.dry
         ? `Dev mode (X402_DRY=1). Claim #1 for $${b.claim_1_for.toFixed(2)}. Live 402 is POST /bid.`
         : `Claim #1 for $${b.claim_1_for.toFixed(2)}. This form posts to POST /bid and expects an x402 client.`;
-      $("board").innerHTML = (b.listings || []).map((row) => `
+      board.dataset.ready = "1";
+      board.innerHTML = (b.listings || []).map((row) => `
         <li>
           <div class="rank">#${row.rank}</div>
           <div>
