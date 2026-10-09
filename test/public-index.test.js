@@ -10,4 +10,6 @@ test("the public board names loading, empty, and error beside the settled-bid li
   assert.match(html, /board is empty/);
   assert.match(html, /Could not load the board\. Nothing was changed\./);
   assert.match(html, /<noscript>/);
+  assert.match(html, /li\.desc,\s*li\.err\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
+  assert.match(html, /li\.desc,\s*li\.err\s*\{[^}]*grid-template-columns:\s*1fr/);
 });

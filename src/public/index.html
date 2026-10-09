@@ -25,6 +25,7 @@
     .hint { color: var(--muted); font-size: 13px; }
     ol { list-style: none; padding: 0; margin: 0; }
     li { display: grid; grid-template-columns: 48px 1fr auto; gap: 12px; padding: 16px 0; border-top: 1px solid var(--line); }
+    li.desc, li.err { grid-column: 1 / -1; grid-template-columns: 1fr; }
     .rank { color: var(--muted); font-variant-numeric: tabular-nums; }
     a { color: var(--fg); text-decoration: none; }
     a:hover { color: var(--acc); }
