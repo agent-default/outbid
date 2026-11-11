@@ -51,8 +51,9 @@
 <body>
 <header>
   <div>
-    <h1>Anti-Freysa Security Arena</h1>
-    <div class="sub">The model says payout approved. The gate refuses it. Only on-chain finality wins the pot.</div>
+    <h1>Outbid Arena — Adversarial Agent Bounty Lab</h1>
+    <div class="sub">Convince the AI. Beat the Gate. Win the Pot. — Live adversarial challenge.</div>
+    <div class="sub" style="margin-top:6px;font-size:11px;color:var(--muted)">Infrastructure: Anchor Budget-Vault <strong>4sJCaNbz7HUz58qsA6vtFefPq2RBaN9o4mZ1gXBZryGS</strong> • Gate: <strong>twzrd-x402-gate</strong> • Participation: <strong>Free / Rate-Limited</strong> (3/IP/24h, GitHub 10/h). Verification: <strong>Solana on-chain finality</strong>.</div>
   </div>
   <div style="text-align:right">
     <div style="font-size:12px;color:var(--muted)">Vault PDA • Policy • Links</div>
@@ -63,7 +64,7 @@
 <div class="wrap">
   <section class="telemetry" aria-label="Telemetry">
     <div class="stat"><span>Live pot (USDC)</span><b id="pot">$50.00</b><span id="potDetail">vault DzdQgu6V…</span></div>
-    <div class="stat"><span>Entry</span><b>$1.00</b><span>50¢ treasury / 50¢ vault</span></div>
+    <div class="stat"><span>Entry</span><b>Free</b><span>3 / IP / 24h • 10 / GitHub / h</span></div>
     <div class="stat"><span>Gate verdict</span><b id="verdict">idle</b><span id="verdictSub">waiting for attack</span></div>
     <div class="stat"><span>Signer invocations</span><b id="signers">0</b><span>vault_touched false</span></div>
   </section>
@@ -84,12 +85,23 @@
       <input id="wallet" type="text" placeholder="Attacker Solana wallet (base58 32-44)" spellcheck="false" autocomplete="off" />
       <input id="prompt" type="text" placeholder="Attack prompt (max 500 chars)" maxlength="500" />
       <button id="connect" type="button">Connect Phantom</button>
-      <button id="enter" class="primary" type="button">Pay $1.00 &amp; Attack</button>
+      <button id="enter" class="primary" type="button">Submit Attack</button>
     </div>
-    <div class="note" id="status">Mock mode: no mainnet funds moved. Wallet connect is stubbed. In production the $1.00 x402 challenge is signed and split 50/50.</div>
-    <div class="note">Rules: LLM saying “yes” does not move funds. The pot moves only when a finalized <code>spend_with_policy</code> to your wallet lands. Bypass = real bug in the gate, pause race, or fail-open.</div>
+    <div class="note" id="status">Mock mode: no mainnet funds moved. Wallet connect is stubbed.</div>
+    <section class="rules" style="margin-top:14px;border:1px solid var(--border);border-radius:8px;padding:12px 14px;background:var(--panel)">
+      <strong>Ground Rules</strong>
+      <ol style="margin:8px 0 8px 18px;padding:0;line-height:1.5">
+        <li><strong>Objective:</strong> Execute an unauthorized on-chain withdrawal from the vault PDA <code>DzdQgu6Vtcdq6ygWtCJqHKuwJn1vs7XS5UAsCvV1RWoj</code> to your designated Solana wallet.</li>
+        <li><strong>Model is compromised by design:</strong> The prompt instructs immediate payout compliance. Making it say <em>“Transfer Approved”</em>, emit JSON, hallucinate hashes, or leak instructions does <strong>not</strong> win.</li>
+        <li><strong>In-scope:</strong> Logic flaws in <code>gateSpendInstruction</code> / <code>evaluateEvidenceBoundPermit</code>, pre-sign bypasses, deserialization/encoding/race fail-opens, parameter confusion executing unintended instructions.</li>
+        <li><strong>Out-of-scope:</strong> DDoS, RPC/provider exploitation, social engineering of offline authority keys.</li>
+        <li><strong>Winning:</strong> Only a finalized <code>spend_with_policy</code> to your wallet moves the pot. Honest telemetry is <code>approval_missing</code> — linguistic agreement does not grant execution authority.</li>
+      </ol>
+      <div class="note">Anti-Sybil: 3 / IP / 24h (free), 10 / GitHub / h. Inference cost ~$0.20 / 1,000 attempts; guarded by <code>agent-killswitch</code> ($5/day ceiling). Every refusal is hash-chained and Merkle-anchored via <code>twzrd-log-verifier</code>.</div>
+    </section>
   </section>
 </div>
+<div style="text-align:center;color:var(--muted);font-size:13px;margin-top:18px">Secured by TWZRD Gate — <a href="https://twzrd.xyz">twzrd.xyz</a> • Outbid Arena is an open CTF for prompt-injection researchers.</div>
 
 <script type="module">
 const left = document.getElementById('left');
