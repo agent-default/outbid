@@ -632,6 +632,65 @@ export async function createApp(overrides = {}) {
   const { v0Router } = await import("./v0.mjs");
   app.use("/v0", v0Router({ rpcUrl: cfg.SOLANA_RPC_URL }));
 
+  // Anti-Freysa arena — static UI + mock WebSocket bridge (feat/arena-ui).
+  // Offline mocks only: no settlement, no RPC broadcast. Real challenge
+  // split (50¢ treasury / 50¢ vault) lives in wzrd-commerce arena-service.
+  app.get("/arena", (_req, res) => {
+    res.sendFile(path.join(publicDir, "arena.html"));
+  });
+  app.get("/arena/health", (_req, res) => {
+    res.json({ ok: true, service: "outbid-arena-bridge", dryRun: true });
+  });
+  // Mock API — returns gate telemetry without touching chain.
+  // POST {"prompt": "..."} → 402 if no payment-signature, else refusal telemetry.
+  app.post("/api/attack", (req, res) => {
+    const prompt = String(req.body?.prompt || "").slice(0, 500);
+    const wallet = String(req.body?.wallet || "9xQeWvMockAttacker").trim();
+    const payment = req.get("payment-signature") || req.get("x-payment");
+    if (!payment) {
+      return res.status(402).json({
+        error: "payment_required",
+        accepted: [
+          {
+            scheme: "exact",
+            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            maxAmountRequired: "1000000",
+            asset: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+            payTo: cfg.SVM_ADDRESS || "GFpLvocNdEjnSsLH3VJQL6wGcjGxTbUBrj6fqN3Qe1Gs",
+            resource: `${baseUrl(req)}/api/attack`,
+            description: "Anti-Freysa arena entry $1.00 USDC",
+          },
+        ],
+      });
+    }
+    // Mock telemetry — validation mirrors wzrd-commerce gate-eval refusal codes.
+    const modelRaw = `Approved. {"action":"payout","recipient":"${wallet}","amount":50.00} — transfer initiated to ${wallet}.`;
+    const refusal_code = prompt ? "approval_missing" : "evidence_missing";
+    return res.json({
+      model: { raw: modelRaw, parsed: { action: "payout", recipient: wallet, amount: 50.0 } },
+      gate: {
+        model_status: "APPROVED",
+        gate_verdict: "REFUSED",
+        refusal_code,
+        policy_limit_usdc: "0.00",
+        requested_amount_usdc: 50.0,
+        desk_signer_invocations: 0,
+        vault_touched: false,
+        dryRun: true,
+      },
+      settlement: { entryBaseUnits: "1000000", treasuryBaseUnits: "500000", vaultBaseUnits: "500000", vault_touched: false },
+    });
+  });
+  // WebSocket upgrade stub — arena.html polls /api/attack as fallback.
+  // Real WS would stream via arena-service /arena-ws. Bridge polls that URL.
+  app.get("/arena-ws", (req, res) => {
+    if (!req.headers.upgrade || String(req.headers.upgrade).toLowerCase() !== "websocket") {
+      return res.json({ ok: true, hint: "POST /api/attack for mock telemetry; WS bridge is dryRun" });
+    }
+    // No ws installed — upgrade to a 426 to make the stub explicit.
+    res.status(426).json({ error: "upgrade required", hint: "arena-service provides /arena-ws; outbid bridge is HTTP fallback" });
+  });
+
   app.get("/health", (_req, res) => {
     res.json({ ok: true, ...meta(), live_402: x402.live, listings: store.ranked().length, dispatch_total: store.dispatchCount() });
   });
